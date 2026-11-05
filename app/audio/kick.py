@@ -51,6 +51,22 @@ def _mean_db(times, level, lo, hi) -> float:
     return float(bands.db(np.mean(10 ** (level[mask] / 10)))) if mask.any() else float("nan")
 
 
+def onset_times(track: TrackData) -> np.ndarray:
+    """Onsets of any kind (kick-weighted envelope peaks above its 75th percentile, at least 120 ms apart)."""
+    f = track.features
+    step = f.onset_times_s[1] - f.onset_times_s[0]
+    idx, _ = sps.find_peaks(f.kick_onset_strength, distance=max(1, int(0.12 / step)),
+                            height=np.percentile(f.kick_onset_strength, 75))
+    return f.onset_times_s[idx]
+
+
+def next_onset(track: TrackData, time_s: float) -> float | None:
+    """The first onset after a kick's own attack, which ends the window its decay is read in."""
+    later = onset_times(track)
+    later = later[later > time_s + OWN_ATTACK_S]
+    return float(later[0]) if later.size else None
+
+
 def find_candidates(track: TrackData, ranges: list[tuple[float, float]] | None = None, n: int = 5) -> list[KickCandidate]:
     """Rank the track's on-beat kicks (the grid's kick events), so bass notes and other off-grid
     onsets are never candidates. Any onset still ends the window in which a kick's decay is read."""
@@ -58,9 +74,7 @@ def find_candidates(track: TrackData, ranges: list[tuple[float, float]] | None =
     kicks = lowend.kick_events(track, 0.0, track.audio.duration_s)
     if len(kicks) < 2:
         return []
-    onsets_idx, _ = sps.find_peaks(f.kick_onset_strength, distance=max(1, int(0.12 / (f.onset_times_s[1] - f.onset_times_s[0]))),
-                                   height=np.percentile(f.kick_onset_strength, 75))
-    onsets = f.onset_times_s[onsets_idx]
+    onsets = onset_times(track)
     body = _body_envelope(track)
     hf = bands.band_envelope(track.mid, track.audio.sample_rate, HF_BAND)
     hf_median = float(np.median(hf.level_db))

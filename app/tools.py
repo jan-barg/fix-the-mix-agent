@@ -213,13 +213,14 @@ def measure_stereo(scopes: list[Scope]) -> Evidence:
 def find_kick_candidates(track: TrackData, ranges: list[tuple[float, float]] | None = None, n: int = 3) -> Evidence:
     candidates = kick.find_candidates(track, ranges, n)
     scope = whole_track(track)
-    scalars, table, warnings = {}, [], []
+    scalars, table, warnings, notes = {}, [], [], []
     for rank, c in enumerate(candidates, 1):
         prefix = f"{track.name} kick candidate {rank} at {int(c.time_s // 60)}:{c.time_s % 60:05.2f}"
         scalars[f"{prefix} | fullness relative to strongest kicks"] = scalar(c.fullness_db, "dB")
         scalars[f"{prefix} | isolation above preceding low end"] = scalar(c.isolation_db, "dB")
         scalars[f"{prefix} | body drop within 300 ms"] = scalar(c.decay_drop_db, "dB")
         table.append({"rank": rank, "time_s": round(c.time_s, 3), "flags": c.flags, "reasons": c.reasons})
+        notes.append(f"Candidate {rank} onset at {c.time_s:.3f} s" + (f"; flags: {', '.join(c.flags)}" if c.flags else ""))
     if not candidates:
         warnings.append("no kick candidates found")
     elif candidates[0].flags:
@@ -237,7 +238,7 @@ def find_kick_candidates(track: TrackData, ranges: list[tuple[float, float]] | N
               "ranking": "fullness (body peak vs the track's 95th percentile) first, then isolation from preceding "
                          "low end, inspectable decay and 8-16 kHz contamination; candidates at least 4 s apart",
               "body band": "30-120 Hz"}
-    return evidence.make("find_kick_candidates", [scope], method, {"scalars": scalars, "tables": {"candidates": table}},
+    return evidence.make("find_kick_candidates", [scope], method, {"scalars": scalars, "tables": {"candidates": table}, "notes": notes},
                          figs, warnings, params={"ranges": ranges, "n": n})
 
 

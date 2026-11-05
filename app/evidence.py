@@ -47,12 +47,13 @@ class Evidence:
         return d
 
     def summary_text(self) -> str:
-        """Compact text a researcher reads: scalars with units, notes, method and reliability."""
+        """Compact text a researcher reads: scalars with units, notes, method and reliability. A scalar
+        line reads "name = value unit"; names contain colons (times), so the separator is " = "."""
         lines = [f"Evidence {self.id} ({self.tool}): {self.source['description']}"]
         for name, s in self.results.get("scalars", {}).items():
             v = s["value"]
             shown = "unavailable" if v is None else (f"{v:.2f}" if isinstance(v, float) else str(v))
-            lines.append(f"  - {name}: {shown}{' ' + s['unit'] if s.get('unit') and v is not None else ''}")
+            lines.append(f"  - {name} = {shown}{' ' + s['unit'] if s.get('unit') and v is not None else ''}")
         for note in self.results.get("notes", []):
             lines.append(f"  * {note}")
         method = "; ".join(f"{k}: {v}" for k, v in self.method.items() if k != "bands")

@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Literal
@@ -11,7 +12,8 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from app import runs
+from app import runs, trace
+from app.agents import lead
 from app.audio import features, peaks, sections
 from app.audio.decode import AudioError
 from app.audio.features import TrackData
@@ -43,6 +45,12 @@ def _track(run: Run, track_id: str) -> TrackRecord:
 
 def _payload(run: Run) -> dict:
     return run.model_dump(mode="json")
+
+
+def _not_running(run: Run) -> None:
+    """Tracks and sections cannot change under a running analysis (A12)."""
+    if run.id in runs.active or run.state in runs.WORKING:
+        raise HTTPException(409, "The analysis is running. Wait for it to finish before changing tracks or sections.")
 
 
 def _track_id(role: str, slot: int | None) -> tuple[str, str]:
@@ -140,6 +148,7 @@ def upload_track(run_id: str, file: UploadFile = File(...), role: str = Form(...
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(413, TOO_LARGE)
     with runs.lock(run_id):
+        _not_running(run)
         if run.state == "Draft":
             runs.set_state(run, "Preparing")
             runs.save(run)
@@ -155,11 +164,13 @@ def upload_track(run_id: str, file: UploadFile = File(...), role: str = Form(...
     storage.write(path, data, content_type=MEDIA_TYPES[suffix])
     with runs.lock(run_id):
         run = runs.get(run_id)
+        _not_running(run)
         old = run.track(tid)
         if old is not None and old.storage_path != path and old.storage_path.startswith("runs/"):
             storage.delete(old.storage_path)
         record = _install(run, td, source, slot=slot, filename=filename, comment=comment[:2000], storage_path=path)
-        if run.ready_for_sections():
+        runs.archive_research(run)
+        if run.ready_for_sections() and run.state != "NeedsClarification":
             runs.set_state(run, "ReviewingSections")
         runs.save(run)
     log.info("run %s: %s ready (%s, %.0f s, %.2f BPM)", run_id, tid, filename, source["duration_s"], record.grid.bpm)
@@ -171,13 +182,17 @@ def delete_track(run_id: str, track_id: str):
     _run(run_id)
     with runs.lock(run_id):
         run = runs.get(run_id)
+        _not_running(run)
         t = _track(run, track_id)
         if t.storage_path.startswith("runs/"):
             get_storage().delete(t.storage_path)
         run.tracks = [x for x in run.tracks if x.id != track_id]
         run.section_maps.pop(track_id, None)
-        if not run.ready_for_sections() and run.state == "ReviewingSections":
+        archived = runs.archive_research(run)
+        if not run.ready_for_sections() and run.state in ("ReviewingSections", *lead.FINAL_STATES):
             runs.set_state(run, "Preparing")
+        elif archived:
+            runs.set_state(run, "ReviewingSections")
         runs.save(run)
     return _payload(run)
 
@@ -272,10 +287,14 @@ def put_sections(run_id: str, track_id: str, body: SectionMapIn):
         })
     with runs.lock(run_id):
         run = runs.get(run_id)
+        _not_running(run)
         current = run.current_map(track_id)
         new = SectionMap(version=current.version + 1, origin="user", accepted=body.accepted, bpm=body.bpm,
                          downbeat_s=body.downbeat_s, grid_source=body.grid_source, sections=out)
         run.section_maps[track_id].append(new)
+        # Findings measured on the old sections are stale; the new map waits for confirmation.
+        if runs.archive_research(run):
+            runs.set_state(run, "ReviewingSections")
         runs.save(run)
     return new.model_dump(mode="json")
 
@@ -287,10 +306,40 @@ def confirm_sections(run_id: str):
         raise HTTPException(409, "Upload your track and at least one reference first.")
     with runs.lock(run_id):
         run = runs.get(run_id)
+        _not_running(run)
         for maps in run.section_maps.values():
             maps[-1].accepted = maps[-1].confirmed = True
         runs.save(run)
     return _payload(run)
+
+
+# --- Research progress and figures ---
+
+
+@router.get("/runs/{run_id}/progress")
+def progress(run_id: str, since: int = 0):
+    """Trace events from `since` on, and where to ask from next time: the first event still running,
+    so the client receives its update when it ends (DESIGN.md §8, §9)."""
+    run = _run(run_id)
+    events = trace.events(run_id)
+    since = max(0, min(since, len(events)))
+    window = trace.since(run_id, since)
+    running = [since + i for i, e in enumerate(window) if e["status"] == "running"]
+    return {"state": run.state, "busy": run_id in runs.active, "stage": lead.stage(run, window),
+            "from": since, "events": window, "next": running[0] if running else since + len(window),
+            "rounds_used": run.research["rounds_used"], "usage": run.usage}
+
+
+@router.get("/runs/{run_id}/figures/{figure_id}")
+def figure(run_id: str, figure_id: str):
+    _run(run_id)
+    if not re.fullmatch(r"fig_[0-9a-f]{8}", figure_id):
+        raise HTTPException(404, "No such figure.")
+    path = f"runs/{run_id}/figures/{figure_id}.png"
+    storage = get_storage()
+    if not storage.exists(path):
+        raise HTTPException(404, "No such figure.")
+    return Response(storage.read(path), media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
 
 
 # --- Demo ---

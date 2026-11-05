@@ -22,6 +22,9 @@ from app.storage import get_storage, read_json, write_json
 
 STATES = ["Draft", "Preparing", "NeedsClarification", "ReviewingSections", "Researching", "FollowingUp",
           "Writing", "Humanizing", "Validating", "Rendering", "Complete", "Partial", "Failed", "Interrupted"]
+# States in which a /chat request is doing work. A run found in one with no request running (the
+# server restarted mid-run) becomes Interrupted, and the next /chat message resumes it.
+WORKING = {"Researching", "FollowingUp", "Writing", "Humanizing", "Validating", "Rendering"}
 
 
 def now() -> str:
@@ -74,6 +77,14 @@ class Run(BaseModel):
     comments: dict = Field(default_factory=lambda: {"global": ""})
     tracks: list[TrackRecord] = Field(default_factory=list)
     section_maps: dict[str, list[SectionMap]] = Field(default_factory=dict)
+    brief: dict | None = None  # schemas.Brief, recorded by the Lead
+    # rounds_used; results{task_id: researcher task and result}; finished (the Lead's finish_research);
+    # stale: earlier research made obsolete by section edits
+    research: dict = Field(default_factory=lambda: fresh_research())
+    evidence_index: dict[str, dict] = Field(default_factory=dict)  # evidence_id -> tool, description, figures
+    evidence_by_key: dict[str, str] = Field(default_factory=dict)  # cache key -> evidence_id
+    usage: dict = Field(default_factory=lambda: {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+    transcript: list[dict] = Field(default_factory=list)  # what the producer sees: {role, text, at}
 
     def track(self, track_id: str) -> TrackRecord | None:
         return next((t for t in self.tracks if t.id == track_id), None)
@@ -85,6 +96,10 @@ class Run(BaseModel):
     def ready_for_sections(self) -> bool:
         return self.track("user") is not None and any(t.role == "reference" for t in self.tracks)
 
+    def sections_confirmed(self) -> bool:
+        return self.ready_for_sections() and all(
+            (m := self.current_map(t.id)) is not None and m.confirmed for t in self.tracks)
+
 
 class RunNotFound(Exception):
     pass
@@ -92,6 +107,7 @@ class RunNotFound(Exception):
 
 _runs: dict[str, Run] = {}
 _locks: dict[str, threading.Lock] = {}
+active: set[str] = set()  # runs with a /chat request in progress in this process
 _locks_guard = threading.Lock()
 _load_guard = threading.Lock()  # one cold load at a time, so a slow loader cannot replace a newer copy
 
@@ -126,6 +142,9 @@ def get(run_id: str) -> Run:
         if not storage.exists(_path(run_id)):
             raise RunNotFound(run_id)
         run = Run.model_validate(read_json(_path(run_id)))
+        if run.state in WORKING and run_id not in active:
+            set_state(run, "Interrupted", run.state)  # detail: the state to resume
+            write_json(_path(run_id), run.model_dump(mode="json"))
         _runs[run_id] = run
         return run
 
@@ -133,6 +152,50 @@ def get(run_id: str) -> Run:
 def save(run: Run) -> None:
     _runs[run.id] = run
     write_json(_path(run.id), run.model_dump(mode="json"))
+
+
+def fresh_research() -> dict:
+    return {"rounds_used": 0, "results": {}, "finished": None, "stale": []}
+
+
+def archive_research(run: Run) -> bool:
+    """Move research findings to research.stale, because the tracks or sections they were measured on
+    changed (SPEC §2.3). Measurements stay cached by what they depend on. Returns whether there was any."""
+    r = run.research
+    if not (r.get("results") or r.get("finished")):
+        return False
+    old = {k: v for k, v in r.items() if k != "stale"}
+    run.research = {**fresh_research(), "stale": [*r.get("stale", []), old]}
+    return True
+
+
+def add_usage(run_id: str, input_tokens: int, output_tokens: int, cost_usd: float | None) -> None:
+    """Add one model call to the run's totals."""
+    with lock(run_id):
+        run = get(run_id)
+        run.usage["calls"] += 1
+        run.usage["input_tokens"] += input_tokens
+        run.usage["output_tokens"] += output_tokens
+        run.usage["cost_usd"] = round(run.usage["cost_usd"] + (cost_usd or 0.0), 4)
+        save(run)
+
+
+def add_message(run_id: str, role: str, text: str) -> None:
+    with lock(run_id):
+        run = get(run_id)
+        run.transcript.append({"role": role, "text": text, "at": now()})
+        save(run)
+
+
+def load_lead(run_id: str) -> list[dict]:
+    """The Lead's append-only conversation, kept apart from run.json so the UI payload stays small."""
+    path = f"runs/{run_id}/lead.json"
+    storage = get_storage()
+    return read_json(path) if storage.exists(path) else []
+
+
+def save_lead(run_id: str, messages: list[dict]) -> None:
+    write_json(f"runs/{run_id}/lead.json", messages)
 
 
 def set_state(run: Run, state: str, detail: str = "") -> None:

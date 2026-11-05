@@ -5,12 +5,13 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.agents import llm
+from app import runs
+from app.agents import lead, llm
 from app.api import router as api_router
 from app.config import ROOT
 
@@ -18,19 +19,30 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 # --- Config ---
 
-# Day-1 placeholder Lead: the analysis tools are not connected yet (DESIGN.md §13).
+# A session_id that names a run goes to the Lead (app/agents/lead.py). Any other session is a plain
+# conversation without tools, as in the starter.
 SYSTEM_PROMPT = (
-    "You are the Lead of Fix the Mix, a feedback agent for electronic music producers. Producers upload "
-    "their own track and one to three reference tracks, and you plan an evidence-based comparison of "
-    "kick, low end, tonal balance, loudness and stereo. The audio analysis tools are not connected yet, "
-    "so you cannot measure anything: say so plainly when asked about a specific track, and never invent "
-    "measurements."
+    "You are Fix the Mix, a feedback agent for electronic music producers. In the web app, producers upload "
+    "their own track and one to three reference tracks, and a team of agents measures and compares kick, low "
+    "end, tonal balance, loudness and stereo. This conversation is not attached to any uploaded tracks, so you "
+    "cannot measure anything here: answer general mixing questions, say plainly that you have not heard their "
+    "track when asked about it, and never invent measurements."
 )
 
 # --- Session Store ---
 
-# session_id -> list of messages. In-memory for now; runs move to durable storage with the run model.
+# session_id -> list of messages, for sessions that are not runs.
 sessions: dict[str, list] = {}
+
+
+def _run_id(session_id: str | None) -> str | None:
+    if not session_id:
+        return None
+    try:
+        runs.get(session_id)
+    except runs.RunNotFound:
+        return None
+    return session_id
 
 # --- FastAPI App ---
 
@@ -82,6 +94,11 @@ def health():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
+    # A run: the Lead answers, and tool_calls lists the trace events of this request (DESIGN.md §3.1).
+    if (run_id := _run_id(request.session_id)) is not None:
+        response, events = await lead.chat(run_id, request.message)
+        return ChatResponse(response=response, session_id=run_id, tool_calls=events)
+
     # Get or create the session
     session_id = request.session_id or str(uuid.uuid4())
     if session_id not in sessions:
@@ -103,7 +120,13 @@ async def chat(request: ChatRequest):
 
 
 @app.post("/clear")
-def clear(session_id: str | None = None):
+async def clear(session_id: str | None = None):
+    if (run_id := _run_id(session_id)) is not None:
+        try:
+            await lead.clear(run_id)
+        except RuntimeError:
+            raise HTTPException(409, "The analysis is running. Wait for it to finish first.") from None
+        return {"status": "ok"}
     sessions.pop(session_id, None)
     return {"status": "ok"}
 

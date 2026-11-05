@@ -35,7 +35,7 @@ app/
   config.py            settings from env (bucket, limits, model names, caps)
   storage.py           Storage interface: LocalStorage, GCSStorage
   runs.py              Run document model, load/save, state transitions, decoded-audio cache
-  trace.py             Trace events, mapping to /chat tool_calls
+  trace.py             trace events (§8): recorded when they start and end, returned as /chat tool_calls
   audio/
     decode.py          probe + decode with FFmpeg, peak normalisation
     loudness.py        ebur128 runner and parser
@@ -53,21 +53,24 @@ app/
   tools.py             the measurement tools of §5.4: run the audio code, build Evidence and figures
   agents/
     llm.py             LiteLLM wrapper: per-role model routing, retries, JSON validation, usage and cost logging
-    lead.py            Lead loop, tool definitions, phase gating, round cap
-    researchers.py     specialist calls with structured output
+    lead.py            Lead loop, tool definitions, phases, round and turn caps, resume, progress stage
+    context.py         what agents can name: sections ("drop 2"), matched pairs, scope references
+    toolbox.py         measurement tools as agents call them: scope references in, cached Evidence out
+    researchers.py     default evidence bundles, researcher calls, the values check
     writer.py          report drafting with structured output
     humanizer.py       deferred stage (skipped unless a skill file is configured)
     schemas.py         Pydantic models for researcher results and the report
-    prompts/           lead.md, researcher_base.md, kick.md, low_end.md, tonal_loudness.md, stereo.md, writer.md
+    prompts/           lead.md, researcher_base.md, kick.md, low_end.md, tonal_loudness.md, stereo.md (writer.md on day 5)
   report/
     validate.py        numbers, figure links, internal-ID leaks, required sections
     render.py          Jinja2 → HTML, WeasyPrint → PDF
     templates/report.html
 static/
   index.html  styles.css
-  app.js               views, uploads with progress, demo, confirm (run ID in the URL hash)
+  app.js               views, uploads, the Lead's brief, analysis progress and trace, results, follow-ups
   editor.js            canvas section editor: three-band waveform, grid, boundaries, playback
-  report.js  progress-messages.js   (day 4–5)
+  progress-messages.js rotating progress lines (SPEC §2.4)
+  report.js            (day 5)
 demo/
   corpus.json          demo track list: roles, comments, origin (audio itself is not in git)
   audio/               local copies of demo audio (git-ignored; uploaded to the bucket)
@@ -75,9 +78,10 @@ scripts/
   smoke_llm.py         LiteLLM checks of §7.1
   inspect_audio.py     prepare and meter audio files from the command line
   demo_measurements.py run every measurement tool on the demo corpus; writes evidence and charts to .data/
+  demo_research.py     end-to-end brief and research run on the demo corpus, in-process (costs about $1)
   upload_demo.py       copy demo audio to the bucket
   baselines.py         README no-tool baselines (same model, no tools, no system prompt)
-tests/                 synthetic-signal tests for the measurement code (§12)
+tests/                 synthetic-signal tests for the measurement code; agent tests with a scripted model (§12)
 Dockerfile  pyproject.toml  uv.lock  README.md  submission.json  SPEC.md  DESIGN.md
 ```
 
@@ -97,30 +101,32 @@ POST /clear?session_id=...
 {
   "name": "run_researcher",
   "agent": "lead",
-  "args": {"specialist": "low_end", "question": "…", "sections": ["Drop 1 ↔ Ref A Drop 1"]},
-  "result": "6 observations, 2 experiments, 1 follow-up request (summary)",
+  "args": {"specialist": "low_end", "question": "…", "user_intent": "…", "scopes": ["user/drop 2", "ref1/drop 2"]},
+  "result": "Researcher t_08 (low_end): … (the first 500 characters of what the Lead read)",
   "kind": "llm_tool_call",
-  "task_id": "t_07", "parent_task_id": "t_01", "round": 1,
-  "started_at": "2026-11-09T14:02:11.402Z", "ended_at": "2026-11-09T14:02:39.871Z",
+  "task_id": "t_08", "parent_task_id": null, "round": 1,
+  "started_at": "2026-11-05T19:14:16.912+00:00", "ended_at": "2026-11-05T19:14:47.858+00:00",
   "status": "ok"
 }
 ```
 
-- `agent` is `lead`, `kick_researcher`, `low_end_researcher`, `tonal_loudness_researcher`, `stereo_researcher`, `writer`, `humanizer` or `system`.
-- `kind` is `llm_tool_call` (a model asked for it), `helper` (code ran a measurement for a tool call), or `model_call` (a researcher, Writer or Humanizer invocation).
-- `result` is a short summary (at most ~500 characters). Full outputs live in the run folder and the trace panel links to them.
+- `agent` is `lead` or `<specialist> researcher` (`kick researcher`, `low_end researcher`, …); the Writer and Humanizer join on day 5.
+- `kind` is `llm_tool_call` (the Lead asked for it), `helper` (code ran a measurement, for the Lead or for a researcher's bundle), or `model_call` (a Lead turn or a researcher call). Model calls add `model`, `input_tokens`, `output_tokens`, `cost_usd` and `seconds`; helpers add `evidence_id` and `cached`.
+- `parent_task_id` links a researcher's helpers and model call to the Lead's `run_researcher` call, and a measurement's helper to the Lead's tool call. `round` is set on everything in a research round.
+- `status` is `running` (still going, seen only in progress polls), `ok`, `error` or `interrupted` (left running by a process that stopped).
+- `result` is a short summary (at most 500 characters). Full outputs live in the run folder.
 - Timestamps let the trace panel draw researchers as overlapping bars, which demonstrates parallelism.
 
 ### 3.2 How each phase uses `/chat`
 
 | Phase | Frontend sends | Server does | `/chat` response |
 |---|---|---|---|
-| Brief | After uploads finish: the global comment, or a default request if it is empty | Lead reads the run manifest (tracks, roles, comments, metadata) and either calls `record_brief` or asks one question | Clarifying question, or "Brief recorded — review your sections" |
+| Brief | When the sections view opens: the global comment, or a default request if it is empty | The first message carries the run overview (tracks, comments, sections, matched pairs), so the Lead needs no tool call to read it. It either calls `record_brief` or asks one question | Clarifying question, or a summary of the brief with a request to check the sections |
 | Clarify | The user's answer | Lead continues the same conversation | As above |
-| Research | "Sections confirmed — run the analysis." (sent when the user confirms all maps) | Lead plans, fans out researchers, follows up, calls `finish_research`; then Writer → Humanizer (if configured) → validation → HTML + PDF | Short summary with the top priorities and a link to the report; the full trace in `tool_calls` |
+| Research | "Sections confirmed — run the analysis." (sent when the user confirms all maps) | Lead plans, fans out researchers, follows up, calls `finish_research`; then (day 5) Writer → Humanizer (if configured) → validation → HTML + PDF. Until the Writer exists the run ends `Partial` | The `finish_research` summary; the full trace in `tool_calls` |
 | Follow-up | Any question | Lead answers using existing evidence, running new measurements or researchers when the question needs them (one extra round per question) | The answer, plus its trace |
 
-The Lead keeps one append-only conversation per run (§7.1).
+The Lead keeps one append-only conversation per run (§7.1). Every user message gets a `[Run status]` block appended by the harness (phase, whether the sections are confirmed and the brief recorded, rounds and turns used), which the producer never sees. A second message while one is running returns at once with "I'm still working on your previous message" instead of starting another loop. A session ID that is not a run gets the starter's plain chat, without tools.
 
 ### 3.3 Companion endpoints
 
@@ -131,16 +137,19 @@ The Lead keeps one append-only conversation per run (§7.1).
 | `DELETE /api/runs/{run}/tracks/{track}` | Remove or replace a track |
 | `PUT /api/runs/{run}/comments` | Global comment and per-track comments |
 | `GET /api/runs/{run}` | Run document for the UI: state, tracks, maps, artifacts |
-| `GET /api/runs/{run}/progress` | Current stage, a fun message, recent trace events. Polled about every 1.5 s while a `/chat` request is running |
+| `GET /api/runs/{run}/progress?since=N` | State, whether a request is running, the plain-language stage, trace events from index `N`, and `next`: the index to ask from next time (the first event still running, so its end is picked up). Polled every 1.5 s while a `/chat` request is running |
 | `GET /api/runs/{run}/tracks/{track}/audio` | Original audio for playback, with single-range `Range` support (206) so the browser can seek |
 | `GET /api/runs/{run}/tracks/{track}/peaks` | Precomputed waveform peaks (§5.2) so the browser does not decode the whole file |
 | `GET` / `PUT /api/runs/{run}/tracks/{track}/sections` | Read the current section map, or save a user-edited map (creates a new version) |
 | `POST /api/runs/{run}/sections/confirm` | Mark all current maps as confirmed |
-| `GET /api/runs/{run}/report`, `/report.pdf`, `/figures/{name}.png` | Report artifacts |
+| `GET /api/runs/{run}/figures/{figure_id}` | A figure PNG from the run's evidence |
+| `GET /api/runs/{run}/report`, `/report.pdf` | Report artifacts (day 5) |
 | `POST /api/demo` | Create a run from the demo corpus without uploading |
 | `GET /api/health` | Liveness check (`/healthz` is reserved on `run.app`) |
 
 Run IDs are random UUIDs and work as capability URLs. There is no endpoint that lists runs.
+
+Uploads, deletions, section saves and confirmation return 409 while a `/chat` request is working on the run. After research, any of them moves the findings to `research.stale` and returns the run to `ReviewingSections`, so the next research starts from the new maps; measurements stay cached by what they depend on.
 
 ### 3.4 Upload limits
 
@@ -169,17 +178,26 @@ Run
   brief: goals[], preserve[], reference_roles[]{track_id, aspects[], exclusions[]},
          comparison_mode (separate | aspects | average), combined_target?{contributors, aspects,
          method, weights}, focus_sections[], production_stage, assumptions[]
-  lead_messages[]       append-only Claude conversation (content blocks as JSON)
-  research: rounds_used, researcher_results{task_id: ResearcherResult}, accepted{…}
-  evidence_index{evidence_id: summary}     full records in evidence/
-  report: status, html_path, pdf_path, humanizer: skipped | applied | reverted, validation[]
-  progress: stage, detail, updated_at
+  research: rounds_used, lead_turns, follow_up_round_limit,
+            results{task_id: {specialist, question, scopes, round, evidence[], result (with
+                     finding IDs o1, c1, i1, x1), warnings[], notes[]}},
+            finished{accepted[], rejected[], priorities[], preserve[], limitations[], summary,
+                     accepted_findings{ref: finding}, at}, final_state,
+            stale[]              earlier research archived after track or section edits
+  evidence_index{evidence_id: tool, description, figures[], status}   full records in evidence/
+  evidence_by_key{cache_key: evidence_id}
+  usage: calls, input_tokens, output_tokens, cost_usd
+  transcript[]: role, text, at        what the producer said and the Lead answered
+  report: status, html_path, pdf_path, humanizer: skipped | applied | reverted, validation[]   (day 5)
 ```
+
+The Lead's own conversation (the messages exactly as sent and returned, thinking blocks included) is in `runs/{run_id}/lead.json`, so the run document the UI polls stays small. Progress is derived from the trace (§8), not stored.
 
 ### 4.2 Bucket layout
 
 ```text
 runs/{run_id}/run.json
+runs/{run_id}/lead.json                        the Lead's append-only conversation
 runs/{run_id}/trace.jsonl
 runs/{run_id}/tracks/{track_id}/{sha256[:16]}.{mp3|wav}   named by content: a replaced file gets a new name, the old one is deleted
 runs/{run_id}/evidence/{evidence_id}.json      record (§6)
@@ -194,7 +212,7 @@ demo/audio/*.mp3, demo/corpus.json
 ### 4.3 Single-instance assumptions
 
 - Cloud Run runs with `max-instances=1`, so the in-memory run cache and progress state are authoritative. Every state change is also written to `run.json`.
-- When a run is loaded with a working state (`Preparing`, `Researching`, `Writing`, …) but no active task in this process, it becomes `Interrupted`. The UI offers "Resume", which restarts the interrupted phase. Measurements already cached are reused.
+- When a run is loaded with a working state (`Researching`, `FollowingUp`, `Writing`, …) but no `/chat` request for it in this process, it becomes `Interrupted`, with the state it was in recorded. The UI offers "Continue", which sends a message: the run returns to that state, every tool call the Lead made without a result gets one saying it was interrupted, and the Lead carries on from there. Trace events left `running` are marked `interrupted`. Measurements already cached are reused. Uploads are synchronous requests, so `Preparing` is not a working state.
 - Decoded audio stays in memory rather than in `/tmp`, because Cloud Run's filesystem is memory-backed anyway. Signals are re-decoded on demand (about 1 s per track) and dropped from an LRU cache.
 - At most two decodes and base analyses run at once (a semaphore), so concurrent uploads cannot exhaust the 8 GiB. Requests that need the same file wait for one decode (a lock per file hash), and a run is read from storage once even when several requests ask for it cold.
 - Local storage writes through a uniquely named temporary file and an atomic rename, so two writers of one path never collide.
@@ -361,31 +379,43 @@ If check 2 fails, the fallback is to send Claude calls for the Lead through the 
 
 | Tool | Phase | Effect |
 |---|---|---|
-| `record_brief` | Brief | Stores the brief (§4.1). Asking a clarifying question needs no tool: if the Lead ends its turn without `record_brief`, the run waits for the user's answer (`NeedsClarification`) |
-| `get_run_overview` | Any | Tracks, roles, confirmed maps, matched section pairs, base metrics, and the evidence already available |
-| `measure_loudness`, `measure_tonal_balance`, `measure_stereo`, `find_kick_candidates`, `analyse_kick`, `measure_low_end`, `render_spectrogram` | Research, follow-up | Runs the helper (cached) and returns the evidence ID, summary and figure titles |
-| `run_researcher` | Research, follow-up | `{specialist, question, scope{section_pairs, tracks}, user_intent, evidence_ids[]}`. The harness adds the specialist's default bundle (below) to any evidence the Lead supplies, runs the helpers, then invokes the researcher in a fresh context |
-| `finish_research` | Research | `{accepted[]{task_id, finding_refs[]}, rejected[]{finding_ref, reason}, priorities[≤3], preserve[], limitations[]}`. Ends research and starts the Writer |
+| `record_brief` | Brief, follow-up | Stores the brief (§4.1). Asking a clarifying question needs no tool: if the Lead ends its turn without `record_brief`, the run waits for the user's answer (`NeedsClarification`). The result tells the Lead whether to start research (sections already confirmed) or to ask the producer to check the sections |
+| `get_run_overview` | Any | Tracks, comments, confirmed maps, matched section pairs, the brief, research so far and the evidence already measured |
+| `measure_loudness`, `measure_tonal_balance`, `measure_stereo`, `find_kick_candidates`, `analyse_kick`, `measure_low_end`, `render_spectrogram` | Research, follow-up | Runs the helper (cached) and returns the evidence summary: ID, scalars, notes, method, reliability and figure titles. The Lead does not see the figures |
+| `run_researcher` | Research, follow-up | `{specialist, question, user_intent, scopes[], evidence_ids[]}`. The harness measures the specialist's default bundle (below) on the scopes, adds the evidence the Lead passes, then invokes the researcher in a fresh context |
+| `finish_research` | Research | `{accepted[], rejected[]{finding_ref, reason}, priorities[≤3]{title, why, finding_refs[]}, preserve[], limitations[], summary}`. Refused (with the reasons, so the Lead can fix it) when a reference does not exist, a priority cites a finding that is not accepted, there are more than three priorities, or an accepted observation has check warnings. Ends research and starts the Writer |
+
+**Scope references.** The agents never see section IDs. A scope is `user` (a whole track), `ref1/drop 2` (a confirmed section, named by label and, when the label repeats, its order) or `user@60.0-90.0` (any passage of at least 1 s). Sections are matched across tracks by label and order: your `drop 2` pairs with each reference's `drop 2`, and `unknown` sections are never matched. The default focus is the first section the brief names ("drop" means your first drop), else the first drop, else the first matched pair.
+
+**Phases** come from the run: `brief` until a brief is recorded and every map is confirmed, then `research`, then `follow_up` once `finish_research` has run. A tool outside its phase returns an error result that says why; the tool list never changes.
 
 **Default bundles** (built from cached helpers, so a full first fan-out needs one Lead turn):
 
 | Specialist | Default evidence |
 |---|---|
-| `kick` | Top three candidates per track, `analyse_kick` on the best candidate per track, candidate strip and kick spectrograms |
-| `low_end` | `measure_low_end` on the focus section pair (default: first drop of each track), low-end and full-band spectrograms of a 4-bar passage |
-| `tonal_loudness` | `measure_loudness` (whole track and per section), `measure_tonal_balance` (whole track and matched pairs) |
-| `stereo` | `measure_stereo` (whole track and matched pairs) |
+| `kick` | Top three candidates per track inside its focus section (the whole track if none is found there), `analyse_kick` on each track's best unflagged candidate |
+| `low_end` | `measure_low_end` on the focus sections (its figures include a low-end spectrogram of the first four bars) and an overview spectrogram of the first four bars of each |
+| `tonal_loudness` | `measure_loudness` on the whole tracks, on the focus sections, and on your track's sections in order (the section-to-section progression); `measure_tonal_balance` on the whole tracks and on the focus sections, combined when the brief asks for an averaged target |
+| `stereo` | `measure_stereo` on the whole tracks and on the focus sections |
+
+Each call is a separate measurement, so the `… minus …` differences compare like with like (whole against whole, drop against drop). A researcher gets at most ten figures. In the demo runs a researcher message is 11–40 k input tokens.
 
 **Caps:**
-- A round is a Lead response containing at least one `run_researcher` call. At most 3 rounds (configurable); after that `run_researcher` returns "round cap reached — call finish_research".
-- At most 12 Lead turns in the research phase.
-- One extra round per follow-up question.
+- A round is a Lead response containing at least one `run_researcher` call. All of its researchers (and any measurements in the same response) run concurrently. At most 3 rounds (configurable); after that `run_researcher` returns "Round cap reached: no more researchers. Call finish_research."
+- At most 12 Lead turns in the research phase, counted across messages. The second-to-last turn's results tell the Lead its next turn is the last; at the cap the harness ends research with nothing accepted and says so.
+- If the Lead replies without tools during research, the harness reminds it once to continue or call `finish_research`; a second plain reply is returned to the producer.
+- One extra round per follow-up question. Brief messages get at most 4 Lead turns and follow-up questions 6.
 
 ### 7.3 Researcher contract
 
 - **Inputs:** a system prompt (shared rules plus the specialist's section) and a user message containing the task, the relevant brief excerpt, reference roles, evidence summaries and figures.
-- **Output (`ResearcherResult`, matching SPEC §7.3):** question; scope; observations[]{text, evidence_ids[], values[]{name, value, unit, evidence_id}}; comparisons[]{target, text, evidence_ids[]}; interpretations[]{text, alternatives[]}; experiments[]{action, how_to_verify, supports_goal}; preserve[]; limitations[]; confidence (plain language); follow_up_requests[]{need, why, suggested_tool, params}.
-- **Check before the Lead sees it:** every `values[]` entry must match a scalar in the cited evidence, after rounding. Mismatches are attached as warnings for the Lead to reject or re-request.
+- **Output (`ResearcherResult`, matching SPEC §7.3):** question; scope; observations[]{text, evidence_ids[], values[]{name, value, unit, evidence_id}}; comparisons[]{target, text, evidence_ids[]}; interpretations[]{text, alternatives[]}; experiments[]{action, how_to_verify, supports_goal}; preserve[]; limitations[]; confidence (plain language); follow_up_requests[]{need, why, suggested_tool, suggested_scopes[]}.
+- **Evidence as text:** each scalar is one line, `name = value unit`. Names contain colons (times like 1:32), so the separator is ` = `.
+- **Finding IDs:** the harness numbers findings `o1…`, `c1…`, `i1…`, `x1…`; the Lead refers to them as `<task_id>/o2`.
+- **Check before the Lead sees it:**
+  - Every `values[]` entry must name a scalar in the cited evidence, from evidence this researcher was given, and match it after rounding to the quoted precision (−8.8 matches −8.764; a dropped sign is allowed, for "2.4 LU quieter"). Unavailable values cannot be quoted.
+  - Every number with a unit (dB, LUFS, LU, dBTP, dBFS, Hz, kHz, ms, %, beats, BPM) in an observation's text must match one of its quoted values; in comparisons and interpretations, one of any observation's. Numbers that name things (band edges, windows, analysed frequencies) appear in scalar names or the method and pass. Experiments are exempt: their numbers are suggested settings.
+  - Failures become `CHECK WARNINGS` under the result. The Lead rejects or re-measures those findings, and `finish_research` refuses an accepted observation that still has one.
 
 ### 7.4 Writer
 
@@ -413,17 +443,18 @@ Violations go back to the Writer once, with the list of problems. Anything still
 
 ## 8. Trace
 
-- Every helper run, tool call and model call appends a JSON line to `runs/{run}/trace.jsonl` with the fields in §3.1.
+- Every helper run, tool call and model call is an event with the fields in §3.1. It is recorded when it starts (`running`), so the progress view can draw researchers that are still working, and completed when it ends.
+- Events live in memory and are written to `runs/{run}/trace.jsonl` as a whole file after each Lead turn and at the end of each request (GCS objects cannot be appended to).
 - Each `/chat` response includes the events created during that request.
-- The UI trace panel shows a timeline in which parallel researchers appear as overlapping bars, with expandable arguments and results.
+- The UI draws a timeline in tree order (each `run_researcher` call followed by its measurements and its researcher call) in which parallel researchers appear as overlapping bars, with expandable arguments and results.
 - Plans, evidence and decisions are shown. Thinking content is never shown.
 
 ## 9. Frontend
 
 The frontend is one page with five views, switched by run state:
 
-1. **Upload:** explanation of the product, the global comment box above the cards, your-track card plus three reference cards (file, comment), limits shown, client-side size and format checks. "Prepare tracks" uploads in parallel, then sends the brief to `/chat`.
-2. **Clarify:** a chat strip for the Lead's question, if any.
+1. **Upload:** explanation of the product, the global comment box above the cards, your-track card plus three reference cards (file, comment), limits shown, client-side size and format checks. "Prepare tracks" uploads in parallel and opens the sections view.
+2. **Brief and clarification:** a Lead strip above the editors. When the view opens for the first time it sends the global comment (or a default request) to `/chat`; the Lead's summary or question appears there, rendered from a small Markdown subset (paragraphs, lists, bold) after escaping, with the recorded brief as a list. A reply box answers a question or adjusts the brief. "Confirm all" stays disabled until a brief is recorded.
 3. **Sections:** one editor per track (`editor.js`), drawn on a canvas from the precomputed peaks. No waveform library: the three-band peaks need custom drawing anyway, and it keeps the page dependency-free.
    - Three-band waveform (low blue, mid orange, high white), an overview strip with the visible window, and a section strip coloured by label with bar counts.
    - Bar/beat grid with bar numbers on a ruler and 8-bar phrases marked. Boundaries snap to bars, beats or nothing; Alt ignores the grid while dragging.
@@ -434,8 +465,8 @@ The frontend is one page with five views, switched by run state:
    - A save that returns after further edits does not overwrite them: the newer edits stay, marked unsaved. Track names, file names and labels are escaped before they go into the page.
    - "Accept" per track saves a new map version. "Confirm all" saves any unaccepted maps as they are, then confirms. Leaving the page with unsaved edits asks first.
    - The run ID sits in the URL hash, so a reload returns to the same run and view.
-4. **Progress:** a stage line with a rotating fun message (`progress-messages.js`, e.g. "Feeling the bass thump in the chest", "Mono-Stereo-Mono-Stereo… ARGHHHHHHH") and a live trace panel.
-5. **Report:** the rendered report, PDF download, follow-up chat, and the trace panel.
+4. **Analysis:** confirming sends "Sections confirmed — run the analysis." and polls `/progress` every 1.5 s: the plain stage ("Comparing low-end, Comparing kicks", "Checking a difference: …", "Weighing the findings"), a fun line rotating every 4 s from a pool for whatever is running (`progress-messages.js`, e.g. "Feeling the bass thump in the chest", "Mono-Stereo-Mono-Stereo… ARGHHHHHHH"), the round and cost so far, and the live timeline of the current request. When no request is running any more, the page shows whatever the run reached. A reload during a run returns here and keeps polling; an `Interrupted` run offers "Continue".
+5. **Results (day 4) / Report (day 5):** for now, the `finish_research` summary, the priorities with the findings they cite, what to keep, limitations, accepted findings by specialist with their measured values and figures, follow-up chat (with the stage shown while it works), the full trace, cost, and "Edit sections and run again". Day 5 replaces the findings list with the written report and PDF.
 
 Track colours are fixed: your track plus References 1–3, with a distinct style for a combined target. The same values are used in the CSS and in `figures.py`.
 
@@ -489,13 +520,13 @@ Track colours are fixed: your track plus References 1–3, with a distinct style
   - Ducking: a sine bass with a known sidechain envelope plus kicks recovers within tolerance; an un-ducked bass reports no dip; a changing bass line is marked unavailable; noise without kicks reports no ducking in any band (§5.5).
   - Kicks: exposed kicks outrank kicks over a bass note, with clearly higher isolation, and are not called weaker; the body band reads 45, 60 and 90 Hz tones within 0.5 dB.
   - Runs: concurrent requests for one file decode it once; measurements use the grid the user set; concurrent writes to one path do not collide.
+  - Agents (a scripted fake model, no network): repeated labels get ordinals and pair by order, and a section without a partner gets none; scope references resolve to the named ranges and bad ones are refused with a reason; the values check passes rounded and sign-dropped quotes and flags wrong values, unknown names, evidence the researcher was not given, and unbacked numbers in prose (but not suggested settings); a research message fans out two researchers that overlap in time, runs a second round, and finishes `Partial` with the accepted findings, rounds 1 and 2 on the trace; the round cap turns researcher calls into errors; `finish_research` refuses unknown references, findings with check warnings and priorities citing unaccepted findings; the brief phase refuses measurements and waits in `NeedsClarification`, then records the brief; a second message while working is refused and edits get 409; a run left `Researching` by a dead process loads as `Interrupted` and resumes with its dangling tool call answered; editing sections after research archives the findings.
   - Not covered by tests: the browser editor (escaping, the save race) is checked by hand; the constant-tempo check can miss a tempo change or phase jump when one part of the track does not line up at all, because such windows get almost no weight.
-- **Agent checks on the demo corpus** (days 4–6, not yet in place):
-  - A vague request triggers clarification.
-  - A round-2 follow-up actually happens.
-  - Researchers overlap in the trace.
-  - The round cap holds.
-  - Report validation passes with no evidence IDs in the text.
+- **Agent runs on the demo corpus** (`scripts/demo_research.py`, and the same flow in the browser), November 5, with the draft demo comments:
+  - Brief: the Lead recorded a brief in `aspects` mode (Reference 1 for kick and bass weight, Reference 2 for the build-to-drop jump, Reference 3 for width with its top end excluded, stage master) and asked the producer to check four specific section boundaries.
+  - Research, two runs: round 1 sent all four specialists in parallel (their bars overlap in the trace); between rounds the Lead ran `find_kick_candidates`, `analyse_kick` and `measure_low_end` itself to check a second drop; round 2 sent targeted kick and low-end follow-ups. Both runs ended with the same three priorities (kick attack relative to body, excess sub below about 35 Hz with a weak 44 Hz fundamental, very deep upper-bass ducking), 52 and 61 accepted findings, and 13 and 8 rejected with reasons (mostly check warnings). 136 s and $1.17; about 150 s and $0.85.
+  - A follow-up question about low-end width against Reference 3 was answered from existing evidence in one Lead call ($0.18), and the run returned to `Partial`.
+  - Still to check: a vague request triggering clarification on the real model, the round cap on the real model, and report validation (day 5).
 - **Baselines:** `scripts/baselines.py` sends each README sample question to the Lead's model through LiteLLM with no tools and no system prompt, and stores the raw answers.
 
 ### Demo corpus
@@ -519,7 +550,7 @@ Roles and comments for the demo live in `demo/corpus.json` and can change withou
 | 1 | Thu Nov 5 | This design; repo scaffold from the starter; LiteLLM smoke test (§7.1); storage layer; decode/normalise; `ebur128` parser; placeholder deployed to Cloud Run with bucket and secret | Smoke test passes; `/chat` answers on Cloud Run; a demo track decodes, normalises and meters locally |
 | 2 | Fri Nov 6 | Base analysis, grid, all measurement tools, figures, evidence records, synthetic tests | Every tool produces sensible numbers and charts for all four demo tracks |
 | 3 | Sat Nov 7 | Upload view and endpoints, section proposal, section editor | A run goes from upload to confirmed maps in the browser |
-| 4 | Sun Nov 8 | Lead loop, tools, clarification, parallel researchers, round cap, trace, progress | A research run produces accepted findings with a follow-up round visible in the trace |
+| 4 | Sun Nov 8 | Lead loop, tools, clarification, parallel researchers, round cap, trace, progress | A research run produces accepted findings with a follow-up round visible in the trace. **Done November 5** (§12) |
 | 5 | Mon Nov 9 | Writer, validation and repair, HTML report, PDF, chart and report visual design pass (§14), follow-up chat, full run on Cloud Run | The deployed app produces a report and PDF from the demo corpus |
 | 6 | Tue Nov 10 | README (data loading, three sample queries with real answers, baselines), `submission.json`, polish, Humanizer if supplied | Submission-ready |
 | — | Wed Nov 11 | Buffer and submission | |
@@ -531,6 +562,8 @@ If the schedule slips, cut in this order: kick pitch trajectory → section-labe
 | Item | Needed by |
 |---|---|
 | Visual design pass for charts and the report. The figures are correct but look like plain matplotlib; they need a designed, polished look (typography, palette, spacing, consistent with the web report and PDF). Content and data stay as they are | Day 5 |
-| Comments and reference roles for the demo corpus (`demo/corpus.json`) | Day 4 |
+| Comments and reference roles for the demo corpus (`demo/corpus.json`): drafted on November 5 for the demo runs; the producer should confirm or replace them | Day 5 |
+| The values check flags any unexplained frequency in comparisons and interpretations ("around 90 Hz"), and the Lead rejected a few otherwise sound interpretations for it. Loosen for Hz if the report loses useful findings | Day 5 |
+| The Lead's chat replies (brief summary, follow-up answers) are not run through the report's number validation; the prompt asks it to quote measured values only | Day 5 |
 | BPM and drop timestamps of the demo tracks from the producer, to check the grid and section proposals (detected: Scars Extended and Radio 134, Endless Light 134, FE!N 136, Weightless 130; the producer called the 134.07 reading on Scars a detection error) | Day 4 |
 | Humanizer skill file | Any time; the stage is skipped until then |

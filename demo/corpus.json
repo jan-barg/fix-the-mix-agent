@@ -1,13 +1,13 @@
 {
   "description": "One-click demo and development corpus. Audio is not in git: local copies live in demo/audio/, deployed copies in the bucket under demo/audio/. Real use analyses whatever the user uploads.",
-  "global_comment": "",
+  "global_comment": "Focus on the drops. I want the kick and bass to hit harder without losing the darker tone I have now.",
   "tracks": [
     {
       "file": "scars-extended.mp3",
       "role": "user",
       "title": "Jan Barg, ALPHUH - Scars (Extended Mix)",
       "origin": "The author's own release (Spotify master).",
-      "comment": ""
+      "comment": "This is the mastered version. The kick feels a bit buried under the bass in the drops."
     },
     {
       "file": "endless-light-radio-edit.mp3",
@@ -15,7 +15,7 @@
       "slot": 1,
       "title": "Jan Barg, Ønawa, Jeza - Endless Light (Radio Edit)",
       "origin": "The author's own release (Spotify master).",
-      "comment": ""
+      "comment": "Use this for kick and bass weight in the drop."
     },
     {
       "file": "fein-jan-barg-remix.mp3",
@@ -23,7 +23,7 @@
       "slot": 2,
       "title": "FE!N (Jan Barg Remix)",
       "origin": "The author's remix (master). Contains third-party material; not redistributed in the repository.",
-      "comment": ""
+      "comment": "Use this for the jump in loudness from the build into the drop."
     },
     {
       "file": "weightless-extended.mp3",
@@ -31,7 +31,7 @@
       "slot": 3,
       "title": "it's murph - Weightless (w/ Arlo & Allegra Miles) (Extended)",
       "origin": "Third-party release, supplied by the author as a reference. Not redistributed in the repository.",
-      "comment": ""
+      "comment": "Use this for stereo width, but don't treat its brighter top end as a target."
     }
   ],
   "spares": [
@@ -40,5 +40,6 @@
       "title": "Jan Barg, ALPHUH - Scars (Radio Edit)",
       "origin": "The author's own release (Spotify master). Same song as the demo's user track in a shorter arrangement; useful for testing section matching."
     }
-  ]
+  ],
+  "comments_note": "Draft comments written for the demo (November 5); the producer should confirm or replace them."
 }

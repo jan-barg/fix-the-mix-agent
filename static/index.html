@@ -72,6 +72,19 @@
             get these right. Your edits become the map the analysis uses.</p>
         </div>
       </div>
+      <div class="lead-strip" id="lead-strip">
+        <div class="lead-head">
+          <span class="lead-avatar" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lead-name">Lead</span>
+          <span class="badge" id="brief-badge"></span>
+        </div>
+        <div class="lead-msg" id="lead-msg"></div>
+        <div class="brief" id="brief"></div>
+        <form class="chat-form" id="lead-form">
+          <input id="lead-input" autocomplete="off" placeholder="Answer, or tell the Lead what to change in the brief…" />
+          <button class="btn" type="submit">Send</button>
+        </form>
+      </div>
       <div class="keys">
         <span><kbd>Space</kbd> play / pause</span>
         <span><kbd>S</kbd> split at cursor</span>
@@ -87,15 +100,55 @@
       </div>
     </section>
 
-    <!-- Confirmed -->
-    <section id="view-confirmed" hidden>
+    <!-- Analysis -->
+    <section id="view-analysis" hidden>
       <div class="eyebrow">Step 3</div>
-      <h2>Sections confirmed</h2>
-      <p class="lede">These maps are now the reference for the analysis. The research run uses them to compare
-        matching sections across your track and the references.</p>
-      <div class="summary" id="summary"></div>
+      <h2>Analysing your track</h2>
+      <p class="lede">The Lead sends specialists to compare kick, low end, tone and loudness, and stereo against your
+        references, then checks the differences that matter most for your goals. This usually takes a few minutes.</p>
+      <div class="stage-card">
+        <span class="stage-pulse" id="stage-pulse" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <div class="stage-text">
+          <div class="stage" id="stage">Starting</div>
+          <div class="fun" id="fun"></div>
+        </div>
+        <div class="stage-meta mono" id="stage-meta"></div>
+      </div>
+      <div class="notice" id="analysis-notice" hidden>
+        <span id="analysis-notice-text"></span>
+        <button class="btn" id="resume" type="button">Continue</button>
+      </div>
+      <h3 class="sub">What's running</h3>
+      <div class="trace" id="trace"></div>
+    </section>
+
+    <!-- Results -->
+    <section id="view-results" hidden>
+      <div class="eyebrow">Step 4</div>
+      <h2>What to work on</h2>
+      <p class="lede" id="res-summary"></p>
+      <div class="notice">The written report with graphs and timestamps arrives in the next update. For now, these are
+        the findings the Lead accepted, with the measurements behind them.</div>
+      <div class="priorities" id="priorities"></div>
+      <div class="two-col">
+        <div class="panel"><h3 class="sub">Keep</h3><ul id="preserve"></ul></div>
+        <div class="panel"><h3 class="sub">Limitations</h3><ul id="limitations"></ul></div>
+      </div>
+      <h3 class="sub">Accepted findings</h3>
+      <div class="findings" id="findings"></div>
+      <h3 class="sub">Ask a follow-up</h3>
+      <div class="chat-log" id="chat-log"></div>
+      <form class="chat-form" id="chat-form">
+        <input id="chat-input" autocomplete="off" placeholder="e.g. Does the second drop have the same low-end problem?" />
+        <button class="btn primary" type="submit">Ask</button>
+      </form>
+      <details class="trace-box" id="trace-box">
+        <summary>Tool trace</summary>
+        <div class="trace" id="trace-results"></div>
+      </details>
       <div class="actions">
-        <button class="btn" id="back-to-sections" type="button">Edit sections again</button>
+        <button class="btn" id="edit-sections" type="button">Edit sections and run again</button>
+        <span class="muted mono" id="res-usage"></span>
       </div>
     </section>
   </main>
