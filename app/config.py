@@ -13,6 +13,8 @@ os.environ.setdefault("VERTEXAI_LOCATION", "global")
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL = "anthropic/claude-opus-5-5"
+# Researchers run four at a time, several rounds per run: Sonnet costs half of Opus per token.
+RESEARCHER_MODEL = "anthropic/claude-sonnet-5-5"
 
 
 def _env(name: str, default: str) -> str:
@@ -47,14 +49,14 @@ class Settings:
     max_lead_turns: int = 12
 
     # Bump when any analysis setting changes; it is part of every cache key.
-    config_version: str = "2026-11-05.6"
+    config_version: str = "2026-11-05.7"
 
 
 settings = Settings()
 
 ROLES: dict[str, RoleConfig] = {
     "lead": RoleConfig(_env("LEAD_MODEL", DEFAULT_MODEL), "high"),
-    "researcher": RoleConfig(_env("RESEARCHER_MODEL", DEFAULT_MODEL), "medium"),
+    "researcher": RoleConfig(_env("RESEARCHER_MODEL", RESEARCHER_MODEL), "medium"),
     "writer": RoleConfig(_env("WRITER_MODEL", DEFAULT_MODEL), "high"),
     "humanizer": RoleConfig(_env("HUMANIZER_MODEL", DEFAULT_MODEL), "medium"),
     # README baselines: same model as the Lead, no tools, no system prompt, default effort.

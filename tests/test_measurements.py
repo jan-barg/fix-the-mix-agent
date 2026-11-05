@@ -6,13 +6,14 @@ The ducking and kick tests build full base features (grid, onsets, envelopes) fr
 
 import dataclasses
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from app import evidence, tools
-from app.audio import bands, features, grid, kick, loudness, lowend, sections, stereo, tonal
+from app.audio import bands, decode, features, grid, kick, loudness, lowend, sections, stereo, tonal
 from app.audio.decode import PreparedAudio, ProbeInfo
 from app.audio.features import Scope, TrackData
 
@@ -351,6 +352,29 @@ def test_kick_body_band_reads_flat_across_30_to_120_hz():
 def test_tempo_is_reported_within_one_octave(bpm, reported):
     g = grid.analyse(clicks(np.arange(0, 40, 60 / bpm), 40), SR)
     assert g.bpm == pytest.approx(reported, abs=0.05)
+
+
+@pytest.mark.parametrize("bpm, reported", [(128.06, 128.0), (127.5, 127.5)])
+def test_near_whole_tempo_is_the_whole_number(bpm, reported):
+    # 200 s: long enough that 0.06 BPM drifts the grid 94 ms, so the onsets alone prefer 128.06.
+    # Within 0.1 BPM of a whole number the residue is treated as onset-timing bias (DAW tempos are
+    # whole numbers); a half-BPM tempo is a real setting and is kept.
+    g = grid.analyse(clicks(np.arange(0, 200, 60 / bpm), 200), SR)
+    assert g.bpm == pytest.approx(reported, abs=0.01)
+
+
+DEMO = Path(__file__).resolve().parent.parent / "demo" / "audio" / "scars-extended.mp3"
+
+
+@pytest.mark.skipif(not DEMO.exists(), reason="demo audio is not in git")
+def test_scars_from_bar_33_reads_134_and_lands_on_the_bar():
+    # The excerpt has no clean intro; its dense drops pulled the fit to 134.07 and the grid ~100 ms late.
+    audio = decode.prepare(DEMO, SR)
+    mono = features.mid_signal(audio.signal)
+    bar_33 = grid.analyse(mono, SR).downbeats_s[32]
+    g = grid.analyse(mono[int(round(bar_33 * SR)):], SR)
+    assert g.bpm == 134.0
+    assert g.downbeats_s[0] == pytest.approx(0.0, abs=0.015)
 
 
 def test_short_track_tempo_check_compares_more_than_one_window():

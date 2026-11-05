@@ -16,6 +16,11 @@ PHASE_BIN_S = 0.002  # folding many beats at 5.8 ms hops resolves the onset peak
 # Exactly one octave, so doubling or halving always lands inside (a 95 BPM track is reported as 95,
 # a 92 BPM one as 184; the user can halve it in the editor).
 BPM_RANGE = (95.0, 190.0)
+# Tracks are made in a DAW at one constant, whole-number tempo. A fit this close to a whole number
+# is that number: the residue is onset-timing bias, not tempo. In dense passages the kick's onset
+# energy trails the kick (the bass swelling back), so a Scars excerpt without its clean intro fitted
+# 134.07 and its radio edit 133.94, which drifts the grid about 100 ms over the track.
+WHOLE_BPM_TOLERANCE = 0.1
 # Below this coherence-weighted phase deviation the onsets support one straight grid.
 CONSTANT_TEMPO_MAX_RESIDUAL_S = 0.020
 # A beat this close before 0 s is the file's first beat. Files exported from bar 1 start on a beat,
@@ -91,8 +96,9 @@ def _straight_grid(y: np.ndarray, sr: int, bpm_estimate: float, duration_s: floa
     librosa's beat times are locked to analysis frames (23 ms at hop 512), which quantises its
     tempo: a 134 BPM track comes out as 136. Here a kick-weighted onset envelope at 5.8 ms
     resolution is folded onto candidate periods within ±4 BPM of the tracker's estimate, coarse
-    then fine, and the best period and phase win. A whole-number BPM is preferred when it lines
-    up the onsets almost as well, because DAW projects almost always use one.
+    then fine, and the best period and phase win. The nearest whole-number BPM wins when the fit is
+    within WHOLE_BPM_TOLERANCE of it or lines the onsets up almost as well, because DAW projects
+    almost always use one.
 
     The grid's position comes from 64-beat windows (shorter for a track under 128 beats, so there
     are always at least two to compare), each weighted by how coherently its onsets line up (clean kick passages count most; busy bass lines, whose onsets fall between beats,
@@ -112,7 +118,7 @@ def _straight_grid(y: np.ndarray, sr: int, bpm_estimate: float, duration_s: floa
     bpm, _ = strongest(np.arange(lo, hi, 0.01))
     bpm, best = strongest(np.arange(bpm - 0.02, bpm + 0.02, 0.0005))
     whole, at_whole = strongest(np.array([round(bpm)]))
-    if abs(at_whole) >= 0.95 * abs(best):
+    if abs(bpm - whole) <= WHOLE_BPM_TOLERANCE or abs(at_whole) >= 0.95 * abs(best):
         bpm, best = whole, at_whole
     period = 60.0 / bpm
 
