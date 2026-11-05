@@ -59,6 +59,30 @@ def measure(signal: np.ndarray, sample_rate: int) -> LoudnessResult:
     return parse(proc.stdout.decode(), channels)
 
 
+def integrated_from_momentary(momentary_lufs: np.ndarray) -> float | None:
+    """BS.1770 gated integrated loudness from the 100 ms momentary series.
+
+    Each momentary reading is one 400 ms gating block with 75% overlap, exactly the blocks the
+    standard integrates, so this gives integrated loudness for any time range (a section).
+    NaN readings are already below the absolute gate.
+    """
+    blocks = momentary_lufs[~np.isnan(momentary_lufs)]
+    if blocks.size == 0:
+        return None
+    power = 10.0 ** ((blocks + 0.691) / 10.0)
+    relative_gate = -0.691 + 10.0 * np.log10(power.mean()) - 10.0
+    kept = power[blocks > relative_gate]
+    return float(-0.691 + 10.0 * np.log10(kept.mean())) if kept.size else None
+
+
+def true_peak_dbtp(segment: np.ndarray) -> float:
+    """Estimated true peak of a (channels, samples) segment via 4x oversampling (BS.1770 Annex 2)."""
+    from scipy.signal import resample_poly
+
+    peak = max(float(np.max(np.abs(resample_poly(ch, 4, 1)))) for ch in segment) if segment.size else 0.0
+    return _db(peak)
+
+
 def parse(text: str, channels: int) -> LoudnessResult:
     """Parse ametadata's print output: a 'frame:' line followed by lavfi.r128.* key=value lines."""
     times, momentary, short_term = [], [], []

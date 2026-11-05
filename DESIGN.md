@@ -48,6 +48,7 @@ app/
     figures.py         every chart; shared track colours and scales
     features.py        whole-track base analysis run at upload, cached by file hash
   evidence.py          Evidence records, cache keys, bundle assembly for researchers
+  tools.py             the measurement tools of §5.4: run the audio code, build Evidence and figures
   agents/
     llm.py             LiteLLM wrapper: per-role model routing, retries, JSON validation, usage and cost logging
     lead.py            Lead loop, tool definitions, phase gating, round cap
@@ -66,6 +67,9 @@ demo/
   corpus.json          demo track list: roles, comments, origin (audio itself is not in git)
   audio/               local copies of demo audio (git-ignored; uploaded to the bucket)
 scripts/
+  smoke_llm.py         LiteLLM checks of §7.1
+  inspect_audio.py     prepare and meter audio files from the command line
+  demo_measurements.py run every measurement tool on the demo corpus; writes evidence and charts to .data/
   upload_demo.py       copy demo audio to the bucket
   baselines.py         README no-tool baselines (same model, no tools, no system prompt)
 tests/                 synthetic-signal tests for the measurement code (§12)
@@ -203,10 +207,10 @@ Runs once per file hash and configuration version, and is stored in `cache/featu
 | Feature | Method | Default settings |
 |---|---|---|
 | Loudness series | `ebur128` on the normalised signal piped to FFmpeg | M, S, I, LRA every 100 ms; per-channel sample and true peaks |
-| Grid | `librosa.beat.beat_track` on the mid signal. Tempo is folded into 100–180 BPM. The downbeat phase is chosen from the four candidates by mean low-band (40–150 Hz) onset strength | 4/4 assumed; bars and 8-bar phrases derived |
-| Fractional-octave spectra | STFT magnitudes aggregated into 1/6-octave bands for L, R, mid and side | n_fft 4096, hop 1024, Hann; 20 Hz–20 kHz |
-| Band envelopes | Zero-phase 4th-order Butterworth band-passes, RMS over 10 ms windows | Bands: sub 30–60, low 60–120, upper bass 120–300, low-mid 300–600 Hz (configurable) |
-| Onsets | Low-band onset strength (40–150 Hz) plus a broadband onset envelope | hop 256 |
+| Grid | `librosa.beat.beat_track` gives a first tempo only: its frame-quantised estimate is off by about 2 BPM (134 reads as 136). A kick-weighted onset envelope is then folded onto candidate periods within ±4 BPM (vector strength, 0.01 then 0.0005 BPM steps); a whole-number BPM wins when it lines the onsets up at least 95% as well. The grid is always one straight line of beats. Its position is the peak of the beat-folded onset envelope, with 64-beat windows weighted by how coherently their onsets align (a weighted circular mean alone sat about 25 ms late on Scars). Downbeat phase: harmonic change (beat-synchronous chroma) plus broadband onset strength, best of four. `constant_tempo` records whether the onsets support the straight grid (phase residual under 20 ms and over 80% agreement) | 4/4 assumed; bars and 8-bar phrases derived |
+| Fractional-octave spectra | STFT power aggregated into 1/6-octave bands with overlap weighting (bins narrower than a band are split across bands), Parseval-scaled so band powers sum to the mean square (a full-scale sine reads −3 dB); L, R, mid, side and the cross-spectrum Re(L·R*) for per-band correlation | n_fft 16384, hop 4096, Hann; 20 Hz–20 kHz |
+| Band envelopes | Zero-phase 4th-order Butterworth band-pass, then the analytic (Hilbert) envelope averaged over one period of the band's lowest frequency (at least 10 ms). A plain 10 ms RMS window ripples at a 40 Hz bass's own frequency, which looks like level movement. All envelopes share one 5 ms time axis | Bands: sub 30–60, low 60–120, upper bass 120–300, low-mid 300–600 Hz (configurable) |
+| Onsets | Kick-weighted onset strength: 32 mel bands up to 250 Hz | 22.05 kHz, hop 128 (5.8 ms) |
 | Waveform peaks | Min/max per bucket for the editor | 4000 buckets |
 | Section proposal | §5.3 | |
 
@@ -232,7 +236,7 @@ Every tool returns an Evidence record (§6) and its figures. Settings, bands and
 | `measure_loudness` | Tracks, optional sections | Integrated LUFS (whole track; for a section, computed from its 400 ms blocks with standard gating when at least 3 s long), short-term series, mean and max short-term LUFS per section, LRA, sample peak dBFS, true peak dBTP, PLR (true peak − integrated) as the dynamics descriptor, build→drop contrast in LU. Figures: loudness timeline with section shading; peak/loudness comparison |
 | `measure_tonal_balance` | Whole tracks or matched section pairs; `mode=peak_normalised` (primary) or `level_matched` (secondary, labelled) | Power-averaged 1/6-octave long-term spectrum in dB; summary energies for sub, bass, low-mid, mid, high-mid and air; difference curves against each reference or the combined target. Figures: tonal curves; difference curve |
 | `measure_stereo` | Whole tracks or section pairs | Side-to-mid ratio by 1/3-octave band in dB; L/R correlation over 400 ms windows; mono change by band = 10·log10(\|M\|² / ((\|L\|²+\|R\|²)/2)) with M = (L+R)/2, which is 0 dB for identical channels, about −3 dB for uncorrelated and −∞ for opposite polarity. Flags mono input and silent bands. Figures: side/mid by frequency; correlation timeline; mono change curve |
-| `find_kick_candidates` | One track, optional preferred ranges | Ranked onsets with timestamps and reasons. Score = fullness (low-band peak relative to the track's 95th percentile) × isolation (low-band energy in the 60 ms before the onset, high-frequency energy not aligned with the kick, gap to the next onset ≥ 250 ms). Contamination flags. Figure: strip of the top candidates |
+| `find_kick_candidates` | One track, optional preferred ranges | Ranked on-beat kicks (the grid's kick events, so bass notes are never candidates) with timestamps and reasons, at least 4 s apart. Fullness = 30–120 Hz body peak within 120 ms, relative to the 95th percentile of the better-isolated half of the kicks (a kick over a bass note reads up to ~4 dB fuller only because the bass adds to it). Isolation = body peak above the level 90–40 ms before the onset (any later and the envelope's smoothing already shows the kick). Score = fullness, penalised 6 points per dB beyond −3 dB, + 0.5 × isolation (capped at 20) + 0.3 × decay drop 200–300 ms after the onset (capped at 30) − 0.3 × 8–16 kHz excess − 10 when the next onset of any kind is under 250 ms away. Flags: weaker or filtered variation, bass overlap (isolation under 12 dB), hats or cymbals, next onset too close. Figure: strip of the top candidates |
 | `analyse_kick` | One candidate per track | 400 ms crop. Attack/body ratio (2–8 kHz energy in the first 15 ms vs. 40–120 Hz energy over 15–150 ms). Low-band decay time to −20 dB, unavailable if interrupted. Body peak frequency and centroid. Pitch trajectory only when the spectral peak is prominent enough. Level in the parent track's normalisation, plus an optional labelled gain-matched view. Figures: envelope overlay; kick spectrograms on one colour scale |
 | `measure_low_end` | Matched section pairs, bands | 20–300 Hz distribution (1/6 octave); kick-aligned median envelopes with interquartile range per band; recovery estimates (§5.5); upper-bass harmonic band moving with the low bands. Figures: event-aligned envelopes in ms and beat fractions; low-end spectrogram of a 4-bar passage with kick markers and a full-band companion |
 | `render_spectrogram` | Track, time range, frequency range, preset | Presets: `overview` (n_fft 4096 / hop 1024), `low_detail` (8192 / 256, up to 400 Hz), `transient` (1024 / 128). One fixed dB range for every track in a request |
@@ -241,19 +245,37 @@ Every tool returns an Evidence record (§6) and its figures. Settings, bands and
 
 **Combined targets:** the mean of the contributors' dB curves (tonal, stereo by band) or of their per-section values (loudness), with equal weights unless the brief sets them. The method is recorded in the evidence.
 
-### 5.5 Ducking recovery (default criterion, to be validated)
+### 5.5 Ducking recovery (validated on day 2)
 
-For each kick event in a section, using each band's envelope:
+**Kick events:** the strongest kick-weighted onset within ±40 ms of each grid beat, kept when it is at least 30% of the track's typical (90th percentile) on-beat strength.
 
-- **Baseline:** median level over the last 25% of the interval to the next kick.
-- **Dip:** minimum within the first 60% of the interval, searched only after the first 30 ms so the kick's own transient is excluded.
+Single events are too noisy to measure: a bass line re-articulates inside most beats. A first version required each event's own late-beat level to be steady, and it rejected every event on all four demo tracks. The estimate therefore comes from the **median across kicks**, using each band's envelope:
+
+- **Event curves:** one beat of envelope per kick, from 20 ms before it, each taken relative to its own baseline.
+- **Baseline:** median level from 50% to 80% of the beat. It stops short of the next kick, because zero-phase filtering and smoothing spread the next kick slightly backwards.
+- **Dip:** minimum of the median curve from the kick's own peak in that band (at least 30 ms after the onset) to 50% of the beat. In the sub band a pitch-swept kick's body arrives late (near 100 ms), so a dip searched earlier would only be the kick's attack. The kick's peak is the first prominent peak within 150 ms that the curve rises into from the onset; otherwise the onset.
 - **Depth:** baseline − dip, in dB.
-- **Recovery time:** from the dip until the envelope is back within 10% of the depth from the baseline. Reported in ms and as a fraction of the local beat.
-- **Shape:** classified from the normalised recovery curve as quick return, gradual swell or delayed return.
-- **Repeatability:** median and interquartile range across events.
-- **Unavailable when:** fewer than 8 usable events, depth below 1.5 dB, a baseline spread across events above 3 dB, or no recovery before the next kick.
+- **Recovery time:** from the dip until the median curve is back within 10% of the depth from the baseline. Reported in ms, as a fraction of the beat, and as the time after the kick. The spread is a bootstrap over kicks (200 resamples, IQR).
+- **Shape:** quick return, gradual swell or delayed return, from the median curve.
+- **Consistency:** the share of kicks at least half the depth down at the median dip time.
+- **Unavailable when:**
+  - fewer than 8 kicks;
+  - the median curve moves more than 3 dB (10th–90th percentile) inside the baseline window, meaning a bass note or phrase change sits there;
+  - the depth is under 1.5 dB;
+  - the dip shows in under 60% of kicks;
+  - there is no recovery by 80% of the beat.
+- **Timing resolution:** 5 ms steps, further limited by envelope smoothing (sub 33 ms, low 17 ms, upper bass and low-mid 10 ms). The note goes into every evidence record.
 
-The kick itself dominates the sub band. The researcher prompt and the report therefore treat the upper-bass and harmonic bands as the primary evidence of bass ducking, and present sub-band behaviour as a combined kick-and-bass envelope. A synthetic test (§12) checks the estimator against known sidechain envelopes before it is trusted on real mixes.
+**Validation** (`tests/test_measurements.py`): a 128 BPM loop has kicks at 70→45 Hz and a 220 Hz bass. The bass is held at −12 dB for 50 ms, then ramped back to 0 dB by 200 ms, so it should be back within 10% at 185 ms. The estimator measures a 11.95 dB depth and recovery at 175 ms, which is within one smoothing window. An un-ducked bass reports no dip. A bass that drops 10 dB at 65% of the beat is reported unavailable.
+
+**Demo drops** (loudest 32 bars):
+
+| Track | Upper-bass dip | Recovered after the kick | Kicks showing the dip | Low band (60–120 Hz) |
+|---|---|---|---|---|
+| Scars | 19.6 dB | ≈170 ms | 90% | 10.4 dB dip, recovered by ≈185 ms |
+| Endless Light | 7.3 dB | ≈175 ms | 78% | Unavailable: off-beat bass notes |
+
+The kick itself dominates the sub and low bands. The researcher prompt and the report therefore treat the upper-bass and harmonic bands as the primary evidence of bass ducking, and present sub- and low-band behaviour as a combined kick-and-bass envelope.
 
 ## 6. Evidence model
 
@@ -433,9 +455,12 @@ Track colours are fixed: your track plus References 1–3, with a distinct style
   - Peak normalisation: 0 dBFS across channels with one shared gain; a silent input is reported unavailable.
   - Constant gain invariance: a −6 dB copy normalises to identical measurements.
   - Build→drop contrast survives normalisation.
+  - Band spectra: band powers add up to the mean square; a full-scale sine reads −3 dB in its band.
+  - Section loudness: integrated loudness from the momentary blocks matches FFmpeg's, gates included.
   - Stereo: identical L/R gives 0 dB mono change and correlation 1; a polarity-flipped channel cancels; uncorrelated noise gives about −3 dB.
-  - Ducking: a sine bass with a known sidechain envelope plus kicks recovers within tolerance; an un-ducked bass reports no or small depth; a changing bass line is marked unavailable.
-  - Kicks: an exposed kick outranks one overlapping a bass note.
+  - Grid and kick events: a synthetic 128 BPM loop gives 128.00 BPM and kick events within 12 ms (median) of the true kicks.
+  - Ducking: a sine bass with a known sidechain envelope plus kicks recovers within tolerance; an un-ducked bass reports no dip; a changing bass line is marked unavailable (§5.5).
+  - Kicks: exposed kicks outrank kicks over a bass note, with clearly higher isolation, and are not called weaker.
 - **Agent checks on the demo corpus:**
   - A vague request triggers clarification.
   - A round-2 follow-up actually happens.
@@ -476,8 +501,7 @@ If the schedule slips, cut in this order: kick pitch trajectory → section-labe
 
 | Item | Needed by |
 |---|---|
-| `deploy_url` in `submission.json` (file exists; URL filled in after the first deploy) | Day 1 |
 | Comments and reference roles for the demo corpus (`demo/corpus.json`) | Day 4 |
+| BPM and drop timestamps of the demo tracks from the producer, to check the grid and section proposals (detected: Scars Extended 134, Endless Light 134, FE!N 136, Weightless 130) | Day 3 |
 | Model per role: Opus 5.5 everywhere (default), or Sonnet 5.5 / Gemini for researchers to cut cost | Day 4 |
-| Recovery criterion confirmation after the synthetic test | Day 2 |
 | Humanizer skill file | Any time; the stage is skipped until then |
