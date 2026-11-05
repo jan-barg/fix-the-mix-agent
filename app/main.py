@@ -1,13 +1,17 @@
 import logging
 import os
+import threading
 import uuid
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agents import llm
+from app.api import router as api_router
 from app.config import ROOT
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -30,7 +34,28 @@ sessions: dict[str, list] = {}
 
 # --- FastAPI App ---
 
-app = FastAPI(title="Fix the Mix")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Preload LiteLLM once the server is listening, so the first model call does not pay for the import.
+    threading.Thread(target=llm.load, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Fix the Mix", lifespan=lifespan)
+app.include_router(api_router)
+
+
+class RevalidatingStatic(StaticFiles):
+    """Static files that the browser re-checks on every load, so an edit or deploy shows up at once."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", RevalidatingStatic(directory=ROOT / "static"), name="static")
 
 
 class ChatRequest(BaseModel):
@@ -46,7 +71,7 @@ class ChatResponse(BaseModel):
 
 @app.get("/")
 def index():
-    return FileResponse(ROOT / "static" / "index.html")
+    return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 # Not /healthz: Cloud Run's front end reserves paths ending in "z" on run.app URLs.

@@ -67,7 +67,12 @@ class GCSStorage:
         self.bucket.blob(clean_path(path)).upload_from_string(data, content_type=content_type)
 
     def read(self, path: str) -> bytes:
-        return self.bucket.blob(clean_path(path)).download_as_bytes()
+        from google.api_core.exceptions import NotFound
+
+        try:
+            return self.bucket.blob(clean_path(path)).download_as_bytes()
+        except NotFound:
+            raise FileNotFoundError(path) from None  # same contract as LocalStorage
 
     def exists(self, path: str) -> bool:
         return self.bucket.blob(clean_path(path)).exists()

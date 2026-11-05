@@ -47,7 +47,7 @@ class Settings:
     max_lead_turns: int = 12
 
     # Bump when any analysis setting changes; it is part of every cache key.
-    config_version: str = "2026-11-05.4"
+    config_version: str = "2026-11-05.5"
 
 
 settings = Settings()

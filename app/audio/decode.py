@@ -5,6 +5,7 @@ and every track is normalised once, with one gain for all channels, to 0 dBFS sa
 """
 
 import json
+import logging
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,8 @@ import numpy as np
 # Below this sample peak (-120 dBFS) a track counts as silent and cannot be normalised.
 SILENCE_PEAK = 1e-6
 
+
+log = logging.getLogger(__name__)
 
 class AudioError(Exception):
     """A file that cannot be used, with a reason that is safe to show the user."""
@@ -54,7 +57,8 @@ def probe(path: Path) -> ProbeInfo:
     cmd = ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_streams", "-show_format", "-of", "json", str(path)]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise AudioError(f"The file could not be read as audio ({proc.stderr.strip()[:200] or 'unknown error'}).")
+        log.warning("ffprobe failed on %s: %s", path.name, proc.stderr.strip()[:300])
+        raise AudioError("The file could not be read as audio. Please check that it plays, then upload it as WAV or MP3.")
     info = json.loads(proc.stdout or "{}")
     streams = info.get("streams") or []
     if not streams:

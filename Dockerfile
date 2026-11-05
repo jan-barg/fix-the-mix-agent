@@ -20,6 +20,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app ./app
 COPY static ./static
+COPY demo/corpus.json ./demo/corpus.json
 
 # Cloud Run sets PORT.
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

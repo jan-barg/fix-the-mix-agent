@@ -14,3 +14,6 @@ demo/audio/
 .data/
 *.wav
 *.mp3
+
+# Local Claude Code settings (preview launch config).
+.claude/

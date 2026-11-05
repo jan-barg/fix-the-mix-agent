@@ -7,15 +7,24 @@ come from app.config.ROLES, so switching a role between Claude and Gemini is an 
 import logging
 import time
 from dataclasses import dataclass, field
+from functools import cache
 from typing import Any, TypeVar
 
-import litellm
 from pydantic import BaseModel, ValidationError
 
 from app.config import ROLES
 
 log = logging.getLogger(__name__)
-litellm.suppress_debug_info = True
+
+
+@cache
+def load():
+    """LiteLLM, imported on first use: it is the slowest import in the app, and keeping it out of
+    startup lets a cold Cloud Run instance accept requests sooner. main.py preloads it after startup."""
+    import litellm
+
+    litellm.suppress_debug_info = True
+    return litellm
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -58,6 +67,7 @@ async def complete(
     if response_format:
         kwargs["response_format"] = response_format
 
+    litellm = load()
     start = time.perf_counter()
     response = await litellm.acompletion(model=config.model, messages=messages, num_retries=2, **kwargs)
     seconds = time.perf_counter() - start

@@ -16,6 +16,10 @@ PHASE_BIN_S = 0.002  # folding many beats at 5.8 ms hops resolves the onset peak
 BPM_RANGE = (100.0, 180.0)
 # Below this coherence-weighted phase deviation the onsets support one straight grid.
 CONSTANT_TEMPO_MAX_RESIDUAL_S = 0.020
+# A beat this close before 0 s is the file's first beat. Files exported from bar 1 start on a beat,
+# and the fitted phase scatters by up to about 20 ms either side of it (more when the first attack is
+# clipped); wrapping a beat at -2 ms to the next period would drop bar 1 and shift every bar number.
+START_TOLERANCE_S = 0.050
 
 
 @dataclass
@@ -124,7 +128,7 @@ def _straight_grid(y: np.ndarray, sr: int, bpm_estimate: float, duration_s: floa
     phasors, w = np.array(phasors), np.array(coherence) ** 2
     if not len(phasors) or w.sum() == 0:
         offset = (np.angle(best) / (2 * np.pi)) * period % period
-        return np.arange(offset, duration_s, period), bpm, float("nan"), 0.0
+        return _beats_from(offset, period, duration_s), bpm, float("nan"), 0.0
     offset = (np.angle(np.sum(w * phasors)) / (2 * np.pi)) * period % period
     local_offsets = (np.angle(phasors) / (2 * np.pi)) * period % period
     deviations = (local_offsets - offset + period / 2) % period - period / 2
@@ -135,7 +139,14 @@ def _straight_grid(y: np.ndarray, sr: int, bpm_estimate: float, duration_s: floa
     for mask, wi in zip(masks, w):
         frame_w[mask] = wi
     offset = _onset_peak(times, weights * frame_w, period, offset)
-    return np.arange(offset, duration_s, period), bpm, rms, agree
+    return _beats_from(offset, period, duration_s), bpm, rms, agree
+
+
+def _beats_from(offset: float, period: float, duration_s: float) -> np.ndarray:
+    """Straight beats at a phase in [0, period). The first beat may sit up to START_TOLERANCE_S before 0."""
+    if offset > period - START_TOLERANCE_S:
+        offset -= period
+    return np.arange(offset, duration_s, period)
 
 
 def _onset_peak(times: np.ndarray, weights: np.ndarray, period: float, offset: float) -> float:
@@ -187,6 +198,12 @@ def _downbeat_phase(beats: np.ndarray, y: np.ndarray, sr: int) -> tuple[int, str
     return best, "likely" if margin > 0.25 else "guess"
 
 
+def _starts_on_beat(beats: np.ndarray, y: np.ndarray, sr: int) -> bool:
+    """The first beat is at the file start and there is sound there (not a silent lead-in)."""
+    head = y[: int(0.05 * sr)]
+    return abs(beats[0]) <= START_TOLERANCE_S and head.size > 0 and float(np.mean(head**2)) > 1e-6  # above -60 dBFS
+
+
 def analyse(mono: np.ndarray, sample_rate: int) -> Grid:
     """Tempo, beats and downbeat phase for a mono (mid) signal."""
     y = librosa.resample(mono, orig_sr=sample_rate, target_sr=ANALYSIS_SR) if sample_rate != ANALYSIS_SR else mono
@@ -205,6 +222,8 @@ def analyse(mono: np.ndarray, sample_rate: int) -> Grid:
     straight, bpm, residual, agree = _straight_grid(y, ANALYSIS_SR, 60.0 / float(np.median(np.diff(beats))), duration)
     constant = residual < CONSTANT_TEMPO_MAX_RESIDUAL_S and agree > 0.8
     phase, confidence = _downbeat_phase(straight, y, ANALYSIS_SR)
+    if confidence == "guess" and _starts_on_beat(straight, y, ANALYSIS_SR):
+        phase = 0  # tie-breaker: a file that starts with sound on a beat was almost always exported from bar 1
     return Grid(bpm=float(bpm), beats_s=straight, downbeat_phase=phase, downbeat_confidence=confidence,
                 constant_tempo=constant, beat_residual_s=residual)
 
@@ -213,5 +232,7 @@ def user_grid(bpm: float, first_downbeat_s: float, duration_s: float) -> Grid:
     """A straight grid from the editor's BPM field and downbeat position."""
     period = 60.0 / bpm
     first = first_downbeat_s - period * 4 * np.floor(first_downbeat_s / (period * 4))
+    if first > period * 4 - START_TOLERANCE_S:
+        first -= period * 4
     return Grid(bpm=bpm, beats_s=np.arange(first, duration_s, period), downbeat_phase=0,
                 downbeat_confidence="user", constant_tempo=True, beat_residual_s=0.0)

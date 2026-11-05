@@ -30,16 +30,18 @@ SPEC.md says *what* the system does and the rules it must follow. This document 
 
 ```text
 app/
-  main.py              FastAPI app: /chat, /clear, companion /api routes, static files
+  main.py              FastAPI app: /chat, /clear, static files; preloads LiteLLM after startup
+  api.py               companion /api routes (§3.3): runs, uploads, audio, peaks, section maps, demo
   config.py            settings from env (bucket, limits, model names, caps)
   storage.py           Storage interface: LocalStorage, GCSStorage
-  runs.py              Run document model, load/save, state transitions, progress
+  runs.py              Run document model, load/save, state transitions, decoded-audio cache
   trace.py             Trace events, mapping to /chat tool_calls
   audio/
     decode.py          probe + decode with FFmpeg, peak normalisation
     loudness.py        ebur128 runner and parser
     grid.py            tempo, beats, downbeats, bars, phrases
-    sections.py        section proposal and cross-track matching
+    sections.py        section proposal, bar spans, cross-track matching
+    peaks.py           three-band waveform peaks for the section editor
     bands.py           band definitions, filters, envelopes, fractional-octave spectra
     tonal.py           tonal balance measurements
     stereo.py          stereo and mono measurements
@@ -62,7 +64,10 @@ app/
     render.py          Jinja2 → HTML, WeasyPrint → PDF
     templates/report.html
 static/
-  index.html  app.js  sections.js  report.js  styles.css  progress-messages.js
+  index.html  styles.css
+  app.js               views, uploads with progress, demo, confirm (run ID in the URL hash)
+  editor.js            canvas section editor: three-band waveform, grid, boundaries, playback
+  report.js  progress-messages.js   (day 4–5)
 demo/
   corpus.json          demo track list: roles, comments, origin (audio itself is not in git)
   audio/               local copies of demo audio (git-ignored; uploaded to the bucket)
@@ -127,12 +132,13 @@ The Lead keeps one append-only conversation per run (§7.1).
 | `PUT /api/runs/{run}/comments` | Global comment and per-track comments |
 | `GET /api/runs/{run}` | Run document for the UI: state, tracks, maps, artifacts |
 | `GET /api/runs/{run}/progress` | Current stage, a fun message, recent trace events. Polled about every 1.5 s while a `/chat` request is running |
-| `GET /api/runs/{run}/tracks/{track}/audio` | Original audio for playback |
-| `GET /api/runs/{run}/tracks/{track}/peaks` | Precomputed waveform peaks so the browser does not decode the whole file |
+| `GET /api/runs/{run}/tracks/{track}/audio` | Original audio for playback, with single-range `Range` support (206) so the browser can seek |
+| `GET /api/runs/{run}/tracks/{track}/peaks` | Precomputed waveform peaks (§5.2) so the browser does not decode the whole file |
 | `GET` / `PUT /api/runs/{run}/tracks/{track}/sections` | Read the current section map, or save a user-edited map (creates a new version) |
 | `POST /api/runs/{run}/sections/confirm` | Mark all current maps as confirmed |
 | `GET /api/runs/{run}/report`, `/report.pdf`, `/figures/{name}.png` | Report artifacts |
 | `POST /api/demo` | Create a run from the demo corpus without uploading |
+| `GET /api/health` | Liveness check (`/healthz` is reserved on `run.app`) |
 
 Run IDs are random UUIDs and work as capability URLs. There is no endpoint that lists runs.
 
@@ -207,25 +213,32 @@ Runs once per file hash and configuration version, and is stored in `cache/featu
 | Feature | Method | Default settings |
 |---|---|---|
 | Loudness series | `ebur128` on the normalised signal piped to FFmpeg | M, S, I, LRA every 100 ms; per-channel sample and true peaks |
-| Grid | `librosa.beat.beat_track` gives a first tempo only: its frame-quantised estimate is off by about 2 BPM (134 reads as 136). A kick-weighted onset envelope is then folded onto candidate periods within ±4 BPM (vector strength, 0.01 then 0.0005 BPM steps); a whole-number BPM wins when it lines the onsets up at least 95% as well. The grid is always one straight line of beats. Its position is the peak of the beat-folded onset envelope, with 64-beat windows weighted by how coherently their onsets align (a weighted circular mean alone sat about 25 ms late on Scars). Downbeat phase: harmonic change (beat-synchronous chroma) plus broadband onset strength, best of four. `constant_tempo` records whether the onsets support the straight grid (phase residual under 20 ms and over 80% agreement) | 4/4 assumed; bars and 8-bar phrases derived |
+| Grid | `librosa.beat.beat_track` gives a first tempo only: its frame-quantised estimate is off by about 2 BPM (134 reads as 136). A kick-weighted onset envelope is then folded onto candidate periods within ±4 BPM (vector strength, 0.01 then 0.0005 BPM steps); a whole-number BPM wins when it lines the onsets up at least 95% as well. The grid is always one straight line of beats. Its position is the peak of the beat-folded onset envelope, with 64-beat windows weighted by how coherently their onsets align (a weighted circular mean alone sat about 25 ms late on Scars). Downbeat phase: harmonic change (beat-synchronous chroma) plus broadband onset strength, best of four. `constant_tempo` records whether the onsets support the straight grid (phase residual under 20 ms and over 80% agreement). **File start:** a beat up to 50 ms before 0 s is kept as the first beat instead of wrapping to the next period, and when the downbeat is a guess and the file starts with sound on a beat, that beat is bar 1 (a file exported from bar 1 starts there). See §5.3 for the check | 4/4 assumed; bars and 8-bar phrases derived |
 | Fractional-octave spectra | STFT power aggregated into 1/6-octave bands with overlap weighting (bins narrower than a band are split across bands), Parseval-scaled so band powers sum to the mean square (a full-scale sine reads −3 dB); L, R, mid, side and the cross-spectrum Re(L·R*) for per-band correlation | n_fft 16384, hop 4096, Hann; 20 Hz–20 kHz |
 | Band envelopes | Zero-phase 4th-order Butterworth band-pass, then the analytic (Hilbert) envelope averaged over one period of the band's lowest frequency (at least 10 ms). A plain 10 ms RMS window ripples at a 40 Hz bass's own frequency, which looks like level movement. All envelopes share one 5 ms time axis | Bands: sub 30–60, low 60–120, upper bass 120–300, low-mid 300–600 Hz (configurable) |
 | Onsets | Kick-weighted onset strength: 32 mel bands up to 250 Hz | 22.05 kHz, hop 128 (5.8 ms) |
-| Waveform peaks | Min/max per bucket for the editor | 4000 buckets |
+| Waveform peaks | Per 10 ms bucket: sample min/max (int8) and RMS of three bands (uint8, scaled to the track's 99.5th percentile): low below 200 Hz, mid, high above 2 kHz. Base64 JSON, cached in `cache/peaks/` (about 100–200 KB per track) | 100 buckets/s |
 | Section proposal | §5.3 | |
 
 ### 5.3 Section proposal
 
-- **Bar features:** RMS, low-band share, kick presence (low-band onset strength on beats), spectral centroid, side/mid ratio. All are z-scored per track.
-- **Novelty:** distance between consecutive 4-bar windows. Boundaries are allowed only on 8-bar phrase starts. The highest novelty peaks above a threshold are kept, with a minimum section length of 8 bars.
-- **Labels:** sections are grouped into three energy levels by mean short-term loudness and kick presence.
-  - "drop" = high energy with kick present.
-  - "breakdown" = low energy or no kick.
-  - "build" = a section of rising loudness directly before a drop.
-  - "intro" / "outro" = the first and last low-energy sections.
-  - Everything else is "unknown".
-- Each proposed label has a confidence word (`likely` or `guess`). The editor shows that the labels are suggestions. Chorus/verse labels are only available when the user picks them.
-- **Validation:** check the proposals by eye on the four demo tracks on day 3. If they are poor, the editor still works with manual sections.
+- **Bar features:** short-term loudness, low-band share, kick presence, spectral centroid and side/mid ratio, z-scored per track. Kick presence is beat-synchronous low-end modulation: the body level (sub + low bands) in the first 60 ms after each beat minus its level 60–90% of the way through the beat, clipped to −10…20 dB. A kick makes it clearly positive; a sustained bass with no kick keeps it near 0.
+- **Novelty and boundaries:** distance between the 4-bar windows before and after each bar. Boundaries are allowed only on 8-bar phrase starts. The phrase offset is the alignment whose bar starts carry the most novelty, because tracks often open with a pickup or an odd-length intro. Candidates whose z-scored novelty is above 0 become boundaries.
+- **Labels:** per section, the power-mean momentary loudness, the loudness rise from first to second half, and the mean kick presence.
+  - "drop" = within 3 LU of the loudest section with kick presence of at least 3 dB.
+  - "breakdown" = kick presence under 1.5 dB, or more than 6 LU below the loudest section.
+  - "build" = the section directly before a drop, when it rises by more than 1 LU or has no full kick.
+  - "intro" / "outro" = the first and last sections unless they are drops.
+  - Everything else is "unknown". Adjacent sections with the same label (except builds) are merged.
+- Each proposed label has a confidence word (`likely` or `guess`). The editor shows guesses with a "?" and drops the word once the user edits or accepts the map. Chorus/verse/bridge are only available when the user picks them.
+- **Bar numbers:** bar 1 starts at the first downbeat (which may sit up to 50 ms before 0 s, §5.2) and bar 0 is a pickup. A time within 2% of a bar line counts as on it, so rounding to milliseconds never moves a boundary into the next bar. Server (`sections.bar_span`) and editor use the same rule.
+- **Files that start on bar 1 (checked November 5):** each demo track was cut at a downbeat, exactly and 3 or 10 ms either side, at bar 1 and at bar 33. Before the fix, a cut exactly on bar 1 lost bar 1 on three of the four tracks: the fitted phase came out a millisecond or two before 0 s and wrapped a whole beat later, so every bar number shifted by one. After the fix, 35 of 40 cuts put bar 1 at the cut. The rest are the Scars cuts from bar 33, where the tempo comes out as 134.07 instead of 134 and the grid drifts (a tempo-snapping issue, not the file start).
+- **Day-3 check on the demo tracks:**
+  - Scars (Extended): intro, an unlabelled 16 bars, a short drop, build, drop 1:49–3:00, breakdown, build, drop 3:43–4:41, outro.
+  - Endless Light: intro, drop 0:45–1:56, breakdown, build, drop 3:22–4:25.
+  - FE!N: intro, build, drop, build, drop.
+  - Weightless: intro, drop 0:35–1:34, build, drop 2:04–5:01, breakdown, outro.
+  - The main drops and breakdowns land on the right phrases. The weak spots are the short "drop" in the Scars intro and the long merged drop in Weightless, which the editor fixes in a few clicks. The producer's own timestamps (§14) are still needed to check them properly.
 
 ### 5.4 Measurement tools
 
@@ -405,13 +418,15 @@ The frontend is one page with five views, switched by run state:
 
 1. **Upload:** explanation of the product, the global comment box above the cards, your-track card plus three reference cards (file, comment), limits shown, client-side size and format checks. "Prepare tracks" uploads in parallel, then sends the brief to `/chat`.
 2. **Clarify:** a chat strip for the Lead's question, if any.
-3. **Sections:** one editor per track, built on wavesurfer.js with precomputed peaks.
-   - Sections are regions coloured by label, with draggable edges.
-   - A bar/beat grid is drawn as an overlay, and snapping to it can be toggled.
-   - Split at the cursor, merge with the next section, relabel from a dropdown (custom text allowed).
-   - Play a section, or play around a boundary (±4 s).
+3. **Sections:** one editor per track (`editor.js`), drawn on a canvas from the precomputed peaks. No waveform library: the three-band peaks need custom drawing anyway, and it keeps the page dependency-free.
+   - Three-band waveform (low blue, mid orange, high white), an overview strip with the visible window, and a section strip coloured by label with bar counts.
+   - Bar/beat grid with bar numbers on a ruler and 8-bar phrases marked. Boundaries snap to bars, beats or nothing; Alt ignores the grid while dragging.
+   - Split at the cursor (S), merge with the next section (M), relabel from a dropdown (custom text allowed).
+   - Play, play the selected section, or play ±4 s around the nearest boundary. Starting one editor pauses the others.
+   - Zoom with the buttons, +/− or ctrl/pinch-wheel; drag the waveform to scroll.
    - BPM field and downbeat nudge (±1 beat, ±10 ms). Editing either switches to a straight user grid.
-   - "Accept" per track and "Confirm all".
+   - "Accept" per track saves a new map version. "Confirm all" saves any unaccepted maps as they are, then confirms. Leaving the page with unsaved edits asks first.
+   - The run ID sits in the URL hash, so a reload returns to the same run and view.
 4. **Progress:** a stage line with a rotating fun message (`progress-messages.js`, e.g. "Feeling the bass thump in the chest", "Mono-Stereo-Mono-Stereo… ARGHHHHHHH") and a live trace panel.
 5. **Report:** the rendered report, PDF download, follow-up chat, and the trace panel.
 
@@ -445,7 +460,11 @@ Track colours are fixed: your track plus References 1–3, with a distinct style
   - Secret `fix-the-mix-anthropic-api-key`. The project's existing `anthropic-api-key` secret belongs to the other app and is not used.
   - `.gcloudignore` and `.dockerignore` keep `.env`, local data and audio out of the upload and the image.
 - **Billing:** request-based billing is fine because all work happens inside requests.
-- **Cold starts:** importing librosa/numba is slow. Keep `min-instances 0` normally and set it to 1 for the grading window.
+- **Cold starts:** on November 5 a request to the scaled-to-zero day-1 build failed with a 500 ("aborted after waiting too long for an available instance"). The new instance took 17 s from start to listening, longer than Cloud Run held the request.
+  - Fix: LiteLLM, the slowest import, now loads on first use and is preloaded in a background thread once the server is listening. Importing `app.main` dropped from 2.1–3 s to 0.6 s locally.
+  - The demo's feature and peaks caches for the current `config_version` are copied to the bucket, so the demo run decodes but does not re-analyse.
+  - Keep `min-instances 0` normally and set it to 1 for the grading window, so graders never hit a cold start.
+- **Image contents:** `app/`, `static/` and `demo/corpus.json`. Demo audio is read from the bucket.
 - **Deploy early:** a placeholder app is deployed on day 1 so that container, secret and bucket problems show up early.
 
 ## 12. Development and validation
@@ -459,6 +478,7 @@ Track colours are fixed: your track plus References 1–3, with a distinct style
   - Section loudness: integrated loudness from the momentary blocks matches FFmpeg's, gates included.
   - Stereo: identical L/R gives 0 dB mono change and correlation 1; a polarity-flipped channel cancels; uncorrelated noise gives about −3 dB.
   - Grid and kick events: a synthetic 128 BPM loop gives 128.00 BPM and kick events within 12 ms (median) of the true kicks.
+  - File start: the loop cut 0, 10 and 20 ms into its first kick keeps that kick's beat as bar 1 at 0 s.
   - Ducking: a sine bass with a known sidechain envelope plus kicks recovers within tolerance; an un-ducked bass reports no dip; a changing bass line is marked unavailable (§5.5).
   - Kicks: exposed kicks outrank kicks over a bass note, with clearly higher isolation, and are not called weaker.
 - **Agent checks on the demo corpus:**
@@ -491,7 +511,7 @@ Roles and comments for the demo live in `demo/corpus.json` and can change withou
 | 2 | Fri Nov 6 | Base analysis, grid, all measurement tools, figures, evidence records, synthetic tests | Every tool produces sensible numbers and charts for all four demo tracks |
 | 3 | Sat Nov 7 | Upload view and endpoints, section proposal, section editor | A run goes from upload to confirmed maps in the browser |
 | 4 | Sun Nov 8 | Lead loop, tools, clarification, parallel researchers, round cap, trace, progress | A research run produces accepted findings with a follow-up round visible in the trace |
-| 5 | Mon Nov 9 | Writer, validation and repair, HTML report, PDF, follow-up chat, full run on Cloud Run | The deployed app produces a report and PDF from the demo corpus |
+| 5 | Mon Nov 9 | Writer, validation and repair, HTML report, PDF, chart and report visual design pass (§14), follow-up chat, full run on Cloud Run | The deployed app produces a report and PDF from the demo corpus |
 | 6 | Tue Nov 10 | README (data loading, three sample queries with real answers, baselines), `submission.json`, polish, Humanizer if supplied | Submission-ready |
 | — | Wed Nov 11 | Buffer and submission | |
 
@@ -501,6 +521,7 @@ If the schedule slips, cut in this order: kick pitch trajectory → section-labe
 
 | Item | Needed by |
 |---|---|
+| Visual design pass for charts and the report. The figures are correct but look like plain matplotlib; they need a designed, polished look (typography, palette, spacing, consistent with the web report and PDF). Content and data stay as they are | Day 5 |
 | Comments and reference roles for the demo corpus (`demo/corpus.json`) | Day 4 |
 | BPM and drop timestamps of the demo tracks from the producer, to check the grid and section proposals (detected: Scars Extended 134, Endless Light 134, FE!N 136, Weightless 130) | Day 3 |
 | Model per role: Opus 5.5 everywhere (default), or Sonnet 5.5 / Gemini for researchers to cut cost | Day 4 |

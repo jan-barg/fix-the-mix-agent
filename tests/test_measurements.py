@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from app.audio import bands, features, kick, loudness, lowend, stereo
+from app.audio import bands, features, grid, kick, loudness, lowend, sections, stereo
 from app.audio.decode import PreparedAudio, ProbeInfo
 from app.audio.features import Scope, TrackData
 
@@ -206,3 +206,27 @@ def test_exposed_kick_outranks_one_over_a_bass():
     assert max(c.isolation_db for c in over_bass) < min(c.isolation_db for c in exposed) - 6
     # Fullness is judged against exposed kicks, so the clean ones are not called weaker.
     assert all(c.fullness_db > -1.5 and not any("bass overlap" in f for f in c.flags) for c in exposed)
+
+
+# --- Grid: files that start on bar 1 ---
+
+
+@pytest.mark.parametrize("cut_ms", [0, 10, 20])
+def test_file_starting_on_a_kick_keeps_bar_1_at_the_start(cut_ms):
+    # Cutting into the first kick moves the fitted first beat from just after 0 s to just before it.
+    # Either way it is the file's first beat, and with no bar structure to say otherwise, bar 1.
+    x = loop(220.0, 0.3, sidechain)[int(cut_ms / 1000 * SR):]
+    g = grid.analyse((x / np.max(np.abs(x))).astype(np.float32), SR)
+    assert abs(g.beats_s[0]) <= grid.START_TOLERANCE_S
+    assert g.downbeats_s[0] == g.beats_s[0]
+    track = SimpleNamespace(features=SimpleNamespace(grid=g), audio=SimpleNamespace(duration_s=len(x) / SR))
+    starts = sections.bar_starts(track)
+    assert starts[0] == g.beats_s[0]
+    assert sections.bar_span(0.0, 4 * BEAT, starts[0], 4 * BEAT) == (1, 2)
+
+
+
+def test_short_lead_in_is_bar_1_but_a_real_pickup_is_bar_0():
+    bar = 4 * BEAT
+    assert sections.bar_span(0.0, bar + 0.04, 0.04, bar) == (1, 2)  # 40 ms before the first downbeat
+    assert sections.bar_span(0.0, bar + 0.3, 0.3, bar) == (0, 2)  # a 300 ms pickup
