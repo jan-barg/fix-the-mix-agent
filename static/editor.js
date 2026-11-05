@@ -18,6 +18,8 @@ export const labelColour = (label) => LABEL_COLOURS[label] || CUSTOM_COLOUR;
 // FastAPI sends a string for our own errors and a list of {msg} for request validation errors.
 // Track names, file names and custom labels come from the user: escape them before they go into markup.
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+// Write text only when it differs, so a button under the pointer keeps its nodes.
+const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
 export const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ESCAPES[c]);
 
 export function errorText(detail) {
@@ -191,7 +193,7 @@ export class SectionEditor {
     gridBadge.textContent = this.gridSource === "user" ? "Your grid" : noGrid ? "No beat found" : checkGrid ? "Check the grid" : "Grid detected";
     gridBadge.title = noGrid ? "No steady beat was detected, so this is a placeholder 120 BPM grid: set the BPM and nudge the downbeat."
       : checkGrid ? "The detected bar starts may be off: listen at a boundary and nudge the downbeat if needed." : "";
-    this.$(".accept").textContent = this.accepted ? "Accepted" : "Accept sections";
+    setText(this.$(".accept"), this.accepted ? "Accepted" : "Accept sections");
     this.$(".accept").classList.toggle("primary", !this.accepted);
     this.root.querySelectorAll("[data-snap]").forEach((b) => b.classList.toggle("on", b.dataset.snap === this.snap));
     const s = this.sections[this.selected];
@@ -202,14 +204,24 @@ export class SectionEditor {
       }
       select.value = s.label;
     }
+    // Rewrite the button only when it changes: replacing its content under a pressed mouse button
+    // loses the click, so a Pause pressed during playback would do nothing.
     const playing = !this.audio.paused;
     const playBtn = this.$('[data-act="play"]');
-    playBtn.innerHTML = `${playing ? icon.pause : icon.play}<span>${playing ? "Pause" : "Play"}</span>`;
-    const t = playing ? this.audio.currentTime : this.cursor;
+    if (playBtn.dataset.state !== String(playing)) {
+      playBtn.dataset.state = String(playing);
+      playBtn.innerHTML = `${playing ? icon.pause : icon.play}<span>${playing ? "Pause" : "Play"}</span>`;
+    }
+    this.updateReadout();
+  }
+
+  // The playhead position, every animation frame while playing.
+  updateReadout() {
+    const t = this.audio.paused ? this.cursor : this.audio.currentTime;
     // A short lead-in before the first downbeat reads as bar 1, as in barSpan.
     const bar = Math.max(this.barOf(t), this.downbeat <= START_TOLERANCE_S ? 1 : 0);
     const beatIn = Math.floor((bar - Math.floor(bar)) * 4) + 1;
-    this.$(".readout").textContent = `${fmtTime(t)} · bar ${Math.floor(bar)}.${beatIn}`;
+    setText(this.$(".readout"), `${fmtTime(t)} · bar ${Math.floor(bar)}.${beatIn}`);
   }
 
   changed() {
@@ -417,7 +429,7 @@ export class SectionEditor {
     const span = this.width / this.pxPerS;
     if (t < this.viewStart || t > this.viewStart + span * 0.92) { this.viewStart = t - span * 0.1; this.clampView(); }
     this.draw();
-    this.updateChrome();
+    this.updateReadout();
     requestAnimationFrame(() => this.tick());
   }
 
