@@ -75,23 +75,26 @@ def loudness_timeline(series: list[dict], title: str, sections: dict[str, list[d
 
 
 def loudness_comparison(rows: list[dict], title: str) -> bytes:
-    """rows: [{track_id, label, integrated_lufs, max_short_term_lufs, true_peak_dbtp}]."""
+    """rows: [{track_id, label, integrated_lufs, max_short_term_lufs, true_peak_dbtp}]; any value may be
+    None (a passage too short or silent to meter), and is then left out rather than drawn."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(WIDTH_IN, 0.42 * len(rows) + 1.6), sharey=True,
                                    gridspec_kw={"width_ratios": [2, 1]})
     y = np.arange(len(rows))[::-1]  # first row at the top
     for i, r in zip(y, rows):
         c = colour(r["track_id"])
-        st = r["max_short_term_lufs"]
-        if r["integrated_lufs"] is not None:
-            ax1.plot([r["integrated_lufs"], st], [i, i], color=c, lw=1.2, alpha=0.6)
-            ax1.plot(r["integrated_lufs"], i, "o", color=c, ms=8)
-            ax1.annotate(f"{r['integrated_lufs']:.1f}", (r["integrated_lufs"], i), xytext=(-6, 0),
+        st, integrated, tp = r["max_short_term_lufs"], r["integrated_lufs"], r["true_peak_dbtp"]
+        if integrated is not None and st is not None:
+            ax1.plot([integrated, st], [i, i], color=c, lw=1.2, alpha=0.6)
+        if integrated is not None:
+            ax1.plot(integrated, i, "o", color=c, ms=8)
+            ax1.annotate(f"{integrated:.1f}", (integrated, i), xytext=(-6, 0),
                          textcoords="offset points", ha="right", va="center", fontsize=8)
-        ax1.plot(st, i, "o", mfc="white", mec=c, mew=1.6, ms=8)
-        ax1.annotate(f"{st:.1f}", (st, i), xytext=(6, 0), textcoords="offset points", va="center", fontsize=8)
-        ax2.plot([0, r["true_peak_dbtp"]], [i, i], color=c, lw=3)
-        ax2.annotate(f"{r['true_peak_dbtp']:+.2f}", (r["true_peak_dbtp"], i), xytext=(4, 0),
-                     textcoords="offset points", va="center", fontsize=8)
+        if st is not None:
+            ax1.plot(st, i, "o", mfc="white", mec=c, mew=1.6, ms=8)
+            ax1.annotate(f"{st:.1f}", (st, i), xytext=(6, 0), textcoords="offset points", va="center", fontsize=8)
+        if tp is not None and np.isfinite(tp):
+            ax2.plot([0, tp], [i, i], color=c, lw=3)
+            ax2.annotate(f"{tp:+.2f}", (tp, i), xytext=(4, 0), textcoords="offset points", va="center", fontsize=8)
     ax1.set_yticks(y, [r["label"] for r in rows])
     ax1.margins(x=0.15)
     ax1.set_xlabel("LUFS, louder to the right (filled: integrated, open: max short-term)")

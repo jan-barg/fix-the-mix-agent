@@ -8,7 +8,7 @@ import numpy as np
 
 from app import evidence
 from app.audio import bands, figures, kick, loudness, lowend, stereo, tonal
-from app.audio.features import Scope, TrackData
+from app.audio.features import Scope, TrackData, whole_track
 from app.evidence import Evidence, scalar
 
 NORMALISATION = "each track normalised once to 0 dBFS sample peak (one gain for all channels)"
@@ -17,7 +17,7 @@ NORMALISATION = "each track normalised once to 0 dBFS sample peak (one gain for 
 def _section_shading(scopes: list[Scope]) -> dict[str, list[dict]]:
     shading: dict[str, list[dict]] = {}
     for s in scopes:
-        if s.label != "Whole track":
+        if not s.is_whole:
             shading.setdefault(s.track.id, []).append({"label": s.label, "start_s": s.start_s, "end_s": s.end_s})
     return shading
 
@@ -25,20 +25,64 @@ def _section_shading(scopes: list[Scope]) -> dict[str, list[dict]]:
 # --- Loudness ---
 
 
+def _finite(v: float | None) -> float | None:
+    return v if v is not None and np.isfinite(v) else None
+
+
+def _differences(scopes: list[Scope], values: list[dict[str, float | None]], units: dict[str, str]) -> dict:
+    """Differences the report will want to quote, computed here so the numbers are measured, not
+    worked out in prose: each other track's passage against scopes[0] (the user's), the change from
+    one passage to the next within a track (build to drop), and the user's change against a
+    reference's change between passages with the same labels."""
+    out = {}
+
+    def diff(a, b):
+        return None if a is None or b is None else a - b
+
+    first = scopes[0]
+    for s, v in zip(scopes[1:], values[1:]):
+        if s.track.id != first.track.id:
+            for m, unit in units.items():
+                out[f"{first.describe()} minus {s.describe()} | {m}"] = scalar(diff(values[0][m], v[m]), unit)
+
+    changes: dict[str, list] = {}  # track id -> [(labels, metric, change, name)]
+    for tid in dict.fromkeys(s.track.id for s in scopes):
+        passages = sorted((p for p in zip(scopes, values) if p[0].track.id == tid and not p[0].is_whole),
+                          key=lambda p: p[0].start_s)
+        for (a, va), (b, vb) in zip(passages, passages[1:]):
+            for m, unit in units.items():
+                name = f"{b.describe()} minus {a.describe()}"
+                change = diff(vb[m], va[m])
+                out[f"{name} | {m}"] = scalar(change, unit)
+                changes.setdefault(tid, []).append(((a.label, b.label), m, change, name))
+    for tid, items in changes.items():
+        if tid == first.track.id:
+            continue
+        for labels, m, change, name in changes.get(first.track.id, []):
+            for labels2, m2, change2, name2 in items:
+                if labels2 == labels and m2 == m:
+                    out[f"({name}) minus ({name2}) | {m}"] = scalar(diff(change, change2), units[m])
+    return out
+
+
 def measure_loudness(scopes: list[Scope]) -> Evidence:
-    scalars, rows, series, warnings = {}, [], [], []
+    scalars, rows, series, warnings, values = {}, [], [], [], []
     for s in scopes:
         L = s.track.features.loudness
-        mask = (L.times_s > s.start_s) & (L.times_s <= s.end_s)
-        st = L.short_term_lufs[mask]
-        whole = s.label == "Whole track"
+        # Only readings whose whole window lies inside the passage (momentary 400 ms, short-term 3 s).
+        m_mask = loudness.readings_inside(L.times_s, s.start_s, s.end_s, loudness.MOMENTARY_WINDOW_S)
+        st_mask = loudness.readings_inside(L.times_s, s.start_s, s.end_s, loudness.SHORT_TERM_WINDOW_S)
+        st = L.short_term_lufs[st_mask]
+        whole = s.is_whole
         integrated = L.integrated_lufs if whole else (
-            loudness.integrated_from_momentary(L.momentary_lufs[mask]) if s.duration_s >= 3 else None)
+            loudness.integrated_from_momentary(L.momentary_lufs[m_mask]) if s.duration_s >= 3 else None)
         segment = s.track.audio.signal[:, s.samples()]
-        sample_peak = float(bands.db(np.max(np.abs(segment)) ** 2)) if segment.size else None
-        true_peak = L.max_true_peak_dbtp if whole else loudness.true_peak_dbtp(segment)
+        peak = float(np.max(np.abs(segment))) if segment.size else 0.0
+        sample_peak = 20 * np.log10(peak) if peak > 0 else None  # digital silence has no peak level
+        true_peak = _finite(L.max_true_peak_dbtp if whole else loudness.true_peak_dbtp(segment))
         max_st = float(np.nanmax(st)) if np.isfinite(st).any() else None
         median_st = float(np.nanmedian(st)) if np.isfinite(st).any() else None
+        values.append({"integrated loudness": integrated, "max short-term loudness": max_st, "true peak": true_peak})
         d = s.describe()
         scalars[f"{d} | integrated loudness"] = scalar(integrated, "LUFS")
         scalars[f"{d} | max short-term loudness"] = scalar(max_st, "LUFS")
@@ -47,18 +91,21 @@ def measure_loudness(scopes: list[Scope]) -> Evidence:
         scalars[f"{d} | true peak"] = scalar(true_peak, "dBTP")
         if whole:
             scalars[f"{d} | loudness range"] = scalar(L.lra_lu, "LU")
-            if integrated is not None:
+            if integrated is not None and true_peak is not None:
                 scalars[f"{d} | peak-to-loudness ratio (true peak minus integrated)"] = scalar(true_peak - integrated, "dB")
         if integrated is None:
             warnings.append(f"{d}: integrated loudness unavailable (passage shorter than 3 s or silent)")
+        if max_st is None:
+            warnings.append(f"{d}: short-term loudness unavailable (passage shorter than its 3 s window or silent)")
         rows.append({"track_id": s.track.id, "label": d, "integrated_lufs": integrated,
-                     "max_short_term_lufs": max_st if max_st is not None else -70.0,
-                     "true_peak_dbtp": true_peak})
-        series.append({"track_id": s.track.id, "label": d, "times_s": L.times_s[mask], "short_term_lufs": st})
+                     "max_short_term_lufs": max_st, "true_peak_dbtp": true_peak})
+        series.append({"track_id": s.track.id, "label": d, "times_s": L.times_s[st_mask], "short_term_lufs": st})
+    scalars.update(_differences(scopes, values, {"integrated loudness": "LU", "max short-term loudness": "LU",
+                                                 "true peak": "dB"}))
 
     # A section of a track whose whole timeline is already plotted shows as shading, not its own panel.
-    whole_ids = {s.track.id for s in scopes if s.label == "Whole track"}
-    series = [x for x, s in zip(series, scopes) if s.label == "Whole track" or s.track.id not in whole_ids]
+    whole_ids = {s.track.id for s in scopes if s.is_whole}
+    series = [x for x, s in zip(series, scopes) if s.is_whole or s.track.id not in whole_ids]
     desc = evidence.describe_scopes(scopes)
     figs = [
         evidence.figure("Loudness over time", f"Source: short-term loudness of {desc}.",
@@ -67,7 +114,9 @@ def measure_loudness(scopes: list[Scope]) -> Evidence:
                         figures.loudness_comparison(rows, "Loudness and peaks at equal sample peak")),
     ]
     method = {"meter": "EBU R128 / ITU-R BS.1770 via FFmpeg ebur128 (100 ms steps)",
-              "section integrated loudness": "BS.1770 gating over the section's 400 ms blocks",
+              "section integrated loudness": "BS.1770 gating over the 400 ms blocks that lie wholly inside the section",
+              "section short-term loudness": "3 s readings whose whole window lies inside the section",
+              "differences": "first minus second, in LU for loudness and dB for true peak",
               "true peak": "4x oversampled", "normalisation": NORMALISATION}
     return evidence.make("measure_loudness", scopes, method, {"scalars": scalars}, figs, warnings)
 
@@ -163,7 +212,7 @@ def measure_stereo(scopes: list[Scope]) -> Evidence:
 
 def find_kick_candidates(track: TrackData, ranges: list[tuple[float, float]] | None = None, n: int = 3) -> Evidence:
     candidates = kick.find_candidates(track, ranges, n)
-    scope = Scope(track, 0.0, track.audio.duration_s, "Whole track")
+    scope = whole_track(track)
     scalars, table, warnings = {}, [], []
     for rank, c in enumerate(candidates, 1):
         prefix = f"{track.name} kick candidate {rank} at {int(c.time_s // 60)}:{c.time_s % 60:05.2f}"
@@ -195,7 +244,8 @@ def find_kick_candidates(track: TrackData, ranges: list[tuple[float, float]] | N
 def analyse_kicks(selections: list[tuple[TrackData, float, float | None]]) -> Evidence:
     """selections: (track, onset time, next onset time or None) per kick to compare."""
     analyses = [(t, kick.analyse(t, time_s, next_s)) for t, time_s, next_s in selections]
-    scopes = [Scope(t, a.time_s - kick.CROP_PRE_S, a.time_s + kick.CROP_S, f"kick at {a.time_s:.2f} s") for t, a in analyses]
+    scopes = [Scope(t, a.time_s - kick.CROP_PRE_S, a.time_s + kick.CROP_S, f"kick at {a.time_s:.2f} s", kind="event")
+              for t, a in analyses]
     scalars, notes = {}, []
     for (t, a), s in zip(analyses, scopes):
         d = s.describe()
@@ -224,7 +274,9 @@ def analyse_kicks(selections: list[tuple[TrackData, float, float | None]]) -> Ev
               "decay": "30-120 Hz analytic envelope (5 ms smoothing) falling 20 dB below its peak, before the next onset",
               "pitch": "spectral peak 35-200 Hz in 46 ms windows; reported only with a clear tonal peak",
               "normalisation": NORMALISATION}
-    return evidence.make("analyse_kick", scopes, method, {"scalars": scalars, "notes": notes}, figs)
+    # The next onset bounds the decay reading, so it is part of what the result depends on.
+    return evidence.make("analyse_kick", scopes, method, {"scalars": scalars, "notes": notes}, figs,
+                         params={"next_onsets_s": [next_s for _, _, next_s in selections]})
 
 
 # --- Low end ---

@@ -53,7 +53,9 @@ CRITERION = (
 
 def kick_events(track: TrackData, start_s: float, end_s: float) -> np.ndarray:
     """Kick onsets in a range: the strongest kick-weighted onset within ±40 ms of each grid beat,
-    kept when it is at least 30% of the track's typical (90th percentile) on-beat kick strength."""
+    kept when it is at least 30% of the track's typical (90th percentile) on-beat kick strength
+    and 10% of the track's strong onsets (99th percentile anywhere). The second floor stops a
+    track without on-beat kicks from turning every beat's noise into a "kick"."""
     f = track.features
     times, strength = f.onset_times_s, f.kick_onset_strength
     beats = f.grid.beats_s
@@ -65,8 +67,8 @@ def kick_events(track: TrackData, start_s: float, end_s: float) -> np.ndarray:
             on_beat.append((beat, times[i], strength[i]))
     if not on_beat:
         return np.array([])
-    typical = np.percentile([s for _, _, s in on_beat], 90)
-    return np.array([t for beat, t, s in on_beat if start_s <= beat < end_s and s >= 0.3 * typical])
+    floor = max(0.3 * np.percentile([s for _, _, s in on_beat], 90), 0.1 * np.percentile(strength, 99))
+    return np.array([t for beat, t, s in on_beat if start_s <= beat < end_s and s > 0 and s >= floor])
 
 
 @dataclass
@@ -207,13 +209,17 @@ class LowEndResult:
 
 def analyse(scope: Scope) -> LowEndResult:
     track = scope.track
-    events = kick_events(track, scope.start_s, scope.end_s)
     beat_s = track.features.grid.beat_s
+    events = kick_events(track, scope.start_s, scope.end_s)
+    # Each kick is read over one beat from 20 ms before it; one that runs past the scope would
+    # measure the next section's low end.
+    events = events[(events - PRE_EVENT_S >= scope.start_s) & (events + beat_s <= scope.end_s)]
     recs = {name: recovery(env, name, events, beat_s) for name, env in track.features.envelopes.items()}
     spectra = track.features.spectra
     frames = spectra.frames_in(scope.start_s, scope.end_s)
     keep = (spectra.bands.centres >= 20) & (spectra.bands.centres <= 300)
-    power = spectra.channel_average[:, frames].mean(axis=1)[keep]
+    power = (spectra.channel_average[:, frames].mean(axis=1) if frames.any()
+             else np.full(len(spectra.bands.centres), np.nan))[keep]
     return LowEndResult(
         label=scope.describe(),
         track_id=track.id,

@@ -13,7 +13,9 @@ ANALYSIS_SR = 22050
 HOP = 512
 FINE_HOP = 128  # 5.8 ms, for fitting tempo and phase
 PHASE_BIN_S = 0.002  # folding many beats at 5.8 ms hops resolves the onset peak more finely
-BPM_RANGE = (100.0, 180.0)
+# Exactly one octave, so doubling or halving always lands inside (a 95 BPM track is reported as 95,
+# a 92 BPM one as 184; the user can halve it in the editor).
+BPM_RANGE = (95.0, 190.0)
 # Below this coherence-weighted phase deviation the onsets support one straight grid.
 CONSTANT_TEMPO_MAX_RESIDUAL_S = 0.020
 # A beat this close before 0 s is the file's first beat. Files exported from bar 1 start on a beat,
@@ -27,7 +29,7 @@ class Grid:
     bpm: float
     beats_s: np.ndarray
     downbeat_phase: int  # index of the first downbeat within beats_s (0-3)
-    downbeat_confidence: str  # "likely" or "guess"
+    downbeat_confidence: str  # "likely" or "guess" when detected, "user" when set in the editor, "none" for the fallback
     constant_tempo: bool
     beat_residual_s: float  # RMS deviation of detected beats from the straight grid
 
@@ -46,14 +48,14 @@ class Grid:
             "downbeat_phase": self.downbeat_phase,
             "downbeat_confidence": self.downbeat_confidence,
             "constant_tempo": self.constant_tempo,
-            "beat_residual_s": round(self.beat_residual_s, 4),
+            "beat_residual_s": round(self.beat_residual_s, 4) if np.isfinite(self.beat_residual_s) else None,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Grid":
         return cls(bpm=d["bpm"], beats_s=np.array(d["beats_s"]), downbeat_phase=d["downbeat_phase"],
                    downbeat_confidence=d["downbeat_confidence"], constant_tempo=d["constant_tempo"],
-                   beat_residual_s=d["beat_residual_s"])
+                   beat_residual_s=float("nan") if d["beat_residual_s"] is None else d["beat_residual_s"])
 
 
 def _fold_beats(beats: np.ndarray, onset_env: np.ndarray, times: np.ndarray) -> np.ndarray:
@@ -64,7 +66,7 @@ def _fold_beats(beats: np.ndarray, onset_env: np.ndarray, times: np.ndarray) -> 
         bpm = 60.0 / np.median(np.diff(beats))
         if bpm < BPM_RANGE[0]:
             beats = np.sort(np.concatenate([beats, (beats[:-1] + beats[1:]) / 2]))
-        elif bpm > BPM_RANGE[1]:
+        elif bpm >= BPM_RANGE[1]:
             # Keep whichever alternate set of beats lands on stronger onsets.
             strength = [np.mean(np.interp(beats[k::2], times, onset_env)) for k in (0, 1)]
             beats = beats[int(np.argmax(strength))::2]
@@ -92,8 +94,8 @@ def _straight_grid(y: np.ndarray, sr: int, bpm_estimate: float, duration_s: floa
     then fine, and the best period and phase win. A whole-number BPM is preferred when it lines
     up the onsets almost as well, because DAW projects almost always use one.
 
-    The grid's position comes from 64-beat windows, each weighted by how coherently its onsets
-    line up (clean kick passages count most; busy bass lines, whose onsets fall between beats,
+    The grid's position comes from 64-beat windows (shorter for a track under 128 beats, so there
+    are always at least two to compare), each weighted by how coherently its onsets line up (clean kick passages count most; busy bass lines, whose onsets fall between beats,
     count little). Returns (grid beats, bpm, weighted RMS phase deviation s, share of weight
     within 25 ms of the grid).
     """
@@ -115,7 +117,8 @@ def _straight_grid(y: np.ndarray, sr: int, bpm_estimate: float, duration_s: floa
     period = 60.0 / bpm
 
     # Per-window phasors at the chosen period; coherence = how tightly that window's onsets align.
-    phasors, coherence, masks, window = [], [], [], 64 * period
+    phasors, coherence, masks = [], [], []
+    window = max(min(64 * period, duration_s / 2), 8 * period)
     for start in np.arange(0.0, max(duration_s - window / 2, window / 2), window):
         mask = (times >= start) & (times < start + window)
         total = weights[mask].sum()
@@ -134,6 +137,9 @@ def _straight_grid(y: np.ndarray, sr: int, bpm_estimate: float, duration_s: floa
     deviations = (local_offsets - offset + period / 2) % period - period / 2
     rms = float(np.sqrt(np.sum(w * deviations**2) / w.sum()))
     agree = float(np.sum(w * (np.abs(deviations) < 0.025)) / w.sum())
+    if len(phasors) < 2:
+        # One window agrees with itself whatever the timing, so a short track proves nothing about tempo.
+        rms, agree = float("nan"), 0.0
 
     frame_w = np.zeros_like(weights)
     for mask, wi in zip(masks, w):
@@ -204,6 +210,13 @@ def _starts_on_beat(beats: np.ndarray, y: np.ndarray, sr: int) -> bool:
     return abs(beats[0]) <= START_TOLERANCE_S and head.size > 0 and float(np.mean(head**2)) > 1e-6  # above -60 dBFS
 
 
+def fallback(duration_s: float) -> Grid:
+    """Placeholder when no beat grid can be detected (no steady beat, or a silent mid signal):
+    120 BPM from 0 s, with downbeat_confidence "none" so the editor asks the user to set it."""
+    return Grid(bpm=120.0, beats_s=np.arange(0.0, duration_s, 0.5), downbeat_phase=0, downbeat_confidence="none",
+                constant_tempo=False, beat_residual_s=float("nan"))
+
+
 def analyse(mono: np.ndarray, sample_rate: int) -> Grid:
     """Tempo, beats and downbeat phase for a mono (mid) signal."""
     y = librosa.resample(mono, orig_sr=sample_rate, target_sr=ANALYSIS_SR) if sample_rate != ANALYSIS_SR else mono
@@ -219,7 +232,8 @@ def analyse(mono: np.ndarray, sample_rate: int) -> Grid:
     # Electronic tracks made in a DAW are almost always constant tempo, so the grid is always
     # straight; `constant_tempo` records whether the onsets actually support that, and the
     # editor flags the grid for checking when they do not.
-    straight, bpm, residual, agree = _straight_grid(y, ANALYSIS_SR, 60.0 / float(np.median(np.diff(beats))), duration)
+    estimate = float(np.clip(60.0 / np.median(np.diff(beats)), BPM_RANGE[0], BPM_RANGE[1] - 0.01))
+    straight, bpm, residual, agree = _straight_grid(y, ANALYSIS_SR, estimate, duration)
     constant = residual < CONSTANT_TEMPO_MAX_RESIDUAL_S and agree > 0.8
     phase, confidence = _downbeat_phase(straight, y, ANALYSIS_SR)
     if confidence == "guess" and _starts_on_beat(straight, y, ANALYSIS_SR):
@@ -234,5 +248,6 @@ def user_grid(bpm: float, first_downbeat_s: float, duration_s: float) -> Grid:
     first = first_downbeat_s - period * 4 * np.floor(first_downbeat_s / (period * 4))
     if first > period * 4 - START_TOLERANCE_S:
         first -= period * 4
-    return Grid(bpm=bpm, beats_s=np.arange(first, duration_s, period), downbeat_phase=0,
+    pickup = int(np.floor((first + START_TOLERANCE_S) / period))  # beats before the first downbeat
+    return Grid(bpm=bpm, beats_s=np.arange(first - pickup * period, duration_s, period), downbeat_phase=pickup,
                 downbeat_confidence="user", constant_tempo=True, beat_residual_s=0.0)

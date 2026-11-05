@@ -29,7 +29,7 @@ class TonalCurve:
 def long_term_spectrum(scope: Scope) -> TonalCurve:
     spectra = scope.track.features.spectra
     frames = spectra.frames_in(scope.start_s, scope.end_s)
-    power = spectra.channel_average[:, frames].mean(axis=1)
+    power = spectra.channel_average[:, frames].mean(axis=1) if frames.any() else np.full(len(spectra.bands.centres), np.nan)
     summary = bands.summary_band_power(spectra.bands, power, bands.TONAL_SUMMARY_BANDS)
     return TonalCurve(
         label=scope.describe(),

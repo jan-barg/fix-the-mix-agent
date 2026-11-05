@@ -4,6 +4,7 @@ Paths are relative POSIX strings such as "runs/<run_id>/run.json".
 """
 
 import json
+import uuid
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
@@ -37,7 +38,7 @@ class LocalStorage:
     def write(self, path: str, data: bytes, content_type: str | None = None) -> None:
         full = self._full(path)
         full.parent.mkdir(parents=True, exist_ok=True)
-        tmp = full.with_name(full.name + ".tmp")
+        tmp = full.with_name(f"{full.name}.{uuid.uuid4().hex}.tmp")  # unique: two writers of one path never collide
         tmp.write_bytes(data)
         tmp.replace(full)  # atomic, so a reader never sees half a file
 

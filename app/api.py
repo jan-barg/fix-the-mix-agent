@@ -88,15 +88,21 @@ def put_comments(run_id: str, body: CommentsIn):
 
 
 def _analyse(tid: str, display: str, role: str, data: bytes, suffix: str) -> tuple[TrackData, dict]:
-    """Decode, normalise, base analysis, peaks and a section proposal for one file."""
+    """Decode, normalise, base analysis and peaks for one file; a file already in memory is reused."""
     sha = hashlib.sha256(data).hexdigest()
-    audio = runs.prepare_bytes(data, suffix)
-    if audio.silent:
-        raise AudioError("This file is silent, so there is nothing to measure.")
     storage = get_storage()
-    feats = features.get_or_compute(audio, sha, storage)
-    runs.audio_cache.put(sha, audio, feats)
-    peaks.get_or_compute(audio, sha, storage)
+    with runs.audio_cache.key_lock(sha):
+        cached = runs.audio_cache.lookup(sha)
+        if cached is None:
+            with runs.analysis_slots:
+                audio = runs.prepare_bytes(data, suffix)
+                if audio.silent:
+                    raise AudioError("This file is silent, so there is nothing to measure.")
+                feats = features.get_or_compute(audio, sha, storage)
+                peaks.get_or_compute(audio, sha, storage)
+            runs.audio_cache.put(sha, audio, feats)
+        else:
+            audio, feats = cached
     td = TrackData(tid, display, role, audio, feats)
     p = audio.probe
     source = {"sha256": sha, "bytes": len(data), "format": p.format_name, "codec": p.codec, "sample_rate": p.sample_rate,
@@ -144,7 +150,8 @@ def upload_track(run_id: str, file: UploadFile = File(...), role: str = Form(...
         raise HTTPException(422, str(e)) from None
 
     storage = get_storage()
-    path = f"runs/{run_id}/tracks/{tid}/original{suffix}"
+    # Named by content, so two uploads racing for one slot never overwrite each other's bytes.
+    path = f"runs/{run_id}/tracks/{tid}/{source['sha256'][:16]}{suffix}"
     storage.write(path, data, content_type=MEDIA_TYPES[suffix])
     with runs.lock(run_id):
         run = runs.get(run_id)

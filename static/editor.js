@@ -16,6 +16,10 @@ const START_TOLERANCE_S = 0.05;  // grid.py: a downbeat this close before 0 s is
 export const labelColour = (label) => LABEL_COLOURS[label] || CUSTOM_COLOUR;
 
 // FastAPI sends a string for our own errors and a list of {msg} for request validation errors.
+// Track names, file names and custom labels come from the user: escape them before they go into markup.
+const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+export const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ESCAPES[c]);
+
 export function errorText(detail) {
   return Array.isArray(detail) ? detail.map((d) => d.msg).join("; ") : detail;
 }
@@ -55,6 +59,7 @@ export class SectionEditor {
     this.sections = map.sections.map((s) => ({ ...s }));
     this.accepted = map.accepted || map.confirmed;
     this.dirty = false;
+    this.revision = 0; // bumped on every edit, so a save that returns after further edits cannot erase them
     this.selected = 0;
     this.cursor = 0;
     this.snap = "bar";
@@ -121,8 +126,8 @@ export class SectionEditor {
     this.root.innerHTML = `
       <div class="ed-head">
         <span class="dot"></span>
-        <span class="ed-title">${t.display_name}</span>
-        <span class="ed-file" title="${t.filename}">${t.filename}</span>
+        <span class="ed-title">${esc(t.display_name)}</span>
+        <span class="ed-file" title="${esc(t.filename)}">${esc(t.filename)}</span>
         <span class="spacer"></span>
         <span class="badge grid-badge"></span>
         <span class="badge state-badge"></span>
@@ -180,10 +185,12 @@ export class SectionEditor {
     stateBadge.textContent = this.accepted ? "✓ Accepted" : this.dirty ? "Edited" : "Suggested";
     const g = this.track.grid;
     const gridBadge = this.$(".grid-badge");
+    const noGrid = this.gridSource === "detected" && g.downbeat_confidence === "none";
     const checkGrid = this.gridSource === "detected" && (!g.constant_tempo || g.downbeat_confidence !== "likely");
     gridBadge.className = `badge grid-badge ${checkGrid ? "warn" : ""}`;
-    gridBadge.textContent = this.gridSource === "user" ? "Your grid" : checkGrid ? "Check the grid" : "Grid detected";
-    gridBadge.title = checkGrid ? "The detected bar starts may be off: listen at a boundary and nudge the downbeat if needed." : "";
+    gridBadge.textContent = this.gridSource === "user" ? "Your grid" : noGrid ? "No beat found" : checkGrid ? "Check the grid" : "Grid detected";
+    gridBadge.title = noGrid ? "No steady beat was detected, so this is a placeholder 120 BPM grid: set the BPM and nudge the downbeat."
+      : checkGrid ? "The detected bar starts may be off: listen at a boundary and nudge the downbeat if needed." : "";
     this.$(".accept").textContent = this.accepted ? "Accepted" : "Accept sections";
     this.$(".accept").classList.toggle("primary", !this.accepted);
     this.root.querySelectorAll("[data-snap]").forEach((b) => b.classList.toggle("on", b.dataset.snap === this.snap));
@@ -206,6 +213,7 @@ export class SectionEditor {
   }
 
   changed() {
+    this.revision++;
     this.dirty = true;
     this.accepted = false;
     this.updateChrome();
@@ -421,11 +429,13 @@ export class SectionEditor {
     };
   }
   async save(accepted = true) {
+    const revision = this.revision;
     const r = await fetch(`/api/runs/${this.runId}/tracks/${this.track.id}/sections`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(this.payload(accepted)),
     });
     const body = await r.json();
     if (!r.ok) throw new Error(errorText(body.detail) || "Could not save the sections.");
+    if (this.revision !== revision) return body; // edited while saving: keep the newer local edits, still unsaved
     this.sections = body.sections;
     this.accepted = body.accepted;
     this.dirty = false;

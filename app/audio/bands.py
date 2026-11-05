@@ -91,8 +91,18 @@ class BandSpectra:
         """(|L|²+|R|²)/2: the tonal-balance view that keeps side content."""
         return self.left if self.right is None else (self.left + self.right) / 2
 
+    @property
+    def half_window_s(self) -> float:
+        """A frame centred at t analyses t ± this (half of n_fft)."""
+        step = float(self.times_s[1] - self.times_s[0]) if len(self.times_s) > 1 else 0.0
+        return step * SPECTRUM_N_FFT / SPECTRUM_HOP / 2
+
     def frames_in(self, start_s: float, end_s: float) -> np.ndarray:
-        return (self.times_s >= start_s) & (self.times_s < end_s)
+        """Frames whose whole window lies in [start_s, end_s]. Selecting by centre would let each
+        186 ms half-window reach into the neighbouring section (a drop's first kick into the build).
+        Empty for a range shorter than one window (372 ms at 44.1 kHz)."""
+        h, eps = self.half_window_s, 1e-6
+        return (self.times_s - h >= start_s - eps) & (self.times_s + h <= end_s + eps)
 
 
 def band_spectra(audio: np.ndarray, sample_rate: int, block_frames: int = 256) -> BandSpectra:

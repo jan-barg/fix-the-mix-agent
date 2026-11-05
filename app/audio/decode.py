@@ -14,7 +14,11 @@ import numpy as np
 
 # Below this sample peak (-120 dBFS) a track counts as silent and cannot be normalised.
 SILENCE_PEAK = 1e-6
-
+# The codec each accepted extension must actually contain (ffprobe codec_name prefix): a FLAC or AAC
+# file renamed .wav would otherwise be analysed and then served to the browser under the wrong type.
+CODECS = {".wav": "pcm_", ".mp3": "mp3"}
+PROBE_TIMEOUT_S = 30
+DECODE_TIMEOUT_S = 180  # wall clock; the output length is capped separately with -t
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +59,10 @@ class PreparedAudio:
 def probe(path: Path) -> ProbeInfo:
     """Read the first audio stream's properties. Embedded cover art and other streams are ignored."""
     cmd = ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_streams", "-show_format", "-of", "json", str(path)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=PROBE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise AudioError("Reading this file took too long. Please check that it plays, then export it again as WAV or MP3.") from None
     if proc.returncode != 0:
         log.warning("ffprobe failed on %s: %s", path.name, proc.stderr.strip()[:300])
         raise AudioError("The file could not be read as audio. Please check that it plays, then upload it as WAV or MP3.")
@@ -76,16 +83,21 @@ def probe(path: Path) -> ProbeInfo:
     )
 
 
-def decode(path: Path, info: ProbeInfo, sample_rate: int) -> tuple[np.ndarray, list[str]]:
+def decode(path: Path, info: ProbeInfo, sample_rate: int, max_seconds: float | None = None) -> tuple[np.ndarray, list[str]]:
     """Decode the first audio stream to (channels, samples) float32 at sample_rate.
 
-    The channel count is kept as is: mono stays mono, stereo stays stereo.
+    The channel count is kept as is: mono stays mono, stereo stays stereo. max_seconds caps the
+    decoded length, so a file whose container hides its real duration cannot fill memory.
     """
+    limit = ["-t", f"{max_seconds:.3f}"] if max_seconds else []
     cmd = [
-        "ffmpeg", "-nostdin", "-v", "warning", "-i", str(path), "-map", "0:a:0",
+        "ffmpeg", "-nostdin", "-v", "warning", "-i", str(path), "-map", "0:a:0", *limit,
         "-f", "f32le", "-acodec", "pcm_f32le", "-ar", str(sample_rate), "-ac", str(info.channels), "pipe:1",
     ]
-    proc = subprocess.run(cmd, capture_output=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=DECODE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise AudioError("Decoding this file took too long. Please check that it plays, then export it again as WAV or MP3.") from None
     warnings = [line for line in proc.stderr.decode(errors="replace").splitlines() if line.strip()]
     if proc.returncode != 0:
         raise AudioError(f"Decoding failed: {(warnings or ['unknown error'])[-1][:200]}")
@@ -118,13 +130,23 @@ def prepare(path: Path, sample_rate: int, min_duration_s: float = 0.0, max_durat
             )
 
     info = probe(path)
+    expected = CODECS.get(path.suffix.lower())
+    if expected and not info.codec.startswith(expected):
+        raise AudioError(f"This file is named {path.suffix.lower()} but contains {info.codec or 'unknown'} audio. "
+                         "Please export it as WAV or MP3.")
     if info.channels not in (1, 2):
         raise AudioError(f"Only mono or stereo audio is supported; this file has {info.channels} channels.")
     if info.duration_s:
         check_duration(info.duration_s)  # reject long files before spending time decoding them
 
-    raw, warnings = decode(path, info, sample_rate)
+    cap = max_duration_s + 1.0 if np.isfinite(max_duration_s) else None
+    raw, warnings = decode(path, info, sample_rate, cap)
+    if cap and raw.shape[1] / sample_rate >= cap - 0.01:
+        raise AudioError(f"The track is longer than {max_duration_s / 60:.0f} minutes; tracks must be between "
+                         f"{min_duration_s:.0f} s and {max_duration_s / 60:.0f} minutes.")
     check_duration(raw.shape[1] / sample_rate)  # the container's duration can be missing or wrong
+    if not np.isfinite(raw).all():
+        raise AudioError("The file contains invalid samples (NaN or infinity). Please export it again as WAV or MP3.")
     normalised, peak_db, gain_db = peak_normalise(raw)
     return PreparedAudio(
         signal=normalised,

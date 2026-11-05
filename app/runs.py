@@ -5,6 +5,7 @@ written to runs/<run_id>/run.json. Uploads arrive in parallel, so read-modify-wr
 per-run lock. Track IDs are fixed by slot ("user", "ref1"-"ref3"): replacing a file keeps its ID.
 """
 
+import dataclasses
 import tempfile
 import threading
 import uuid
@@ -92,6 +93,7 @@ class RunNotFound(Exception):
 _runs: dict[str, Run] = {}
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
+_load_guard = threading.Lock()  # one cold load at a time, so a slow loader cannot replace a newer copy
 
 
 def _path(run_id: str) -> str:
@@ -117,12 +119,15 @@ def get(run_id: str) -> Run:
         raise RunNotFound(run_id) from None
     if run_id in _runs:
         return _runs[run_id]
-    storage = get_storage()
-    if not storage.exists(_path(run_id)):
-        raise RunNotFound(run_id)
-    run = Run.model_validate(read_json(_path(run_id)))
-    _runs[run_id] = run
-    return run
+    with _load_guard:
+        if run_id in _runs:  # loaded (and possibly already edited) while this request waited
+            return _runs[run_id]
+        storage = get_storage()
+        if not storage.exists(_path(run_id)):
+            raise RunNotFound(run_id)
+        run = Run.model_validate(read_json(_path(run_id)))
+        _runs[run_id] = run
+        return run
 
 
 def save(run: Run) -> None:
@@ -148,21 +153,45 @@ def read_source(storage_path: str) -> bytes:
     return get_storage().read(storage_path)
 
 
+# Decoding and base analysis are CPU- and memory-heavy (a 10-minute stereo file decodes to about
+# 200 MB of float32 before analysis copies). At most this many run at once, however many uploads,
+# demo runs and cache misses arrive together.
+analysis_slots = threading.BoundedSemaphore(2)
+
+
 class _AudioCache:
-    """Decoded, normalised audio and base features by file hash (LRU). Re-decoding costs about a second."""
+    """Decoded, normalised audio and base features by file hash (LRU). Re-decoding costs about a second.
+
+    Concurrent misses for the same file wait for one decode instead of each decoding it.
+    """
 
     def __init__(self, size: int = 6):
         self.size, self.items, self.guard = size, OrderedDict(), threading.Lock()
+        self.key_locks: dict[str, threading.Lock] = {}
 
-    def get(self, sha256: str, storage_path: str, suffix: str) -> tuple[decode.PreparedAudio, features.BaseFeatures]:
+    def lookup(self, sha256: str) -> tuple[decode.PreparedAudio, features.BaseFeatures] | None:
         with self.guard:
             if sha256 in self.items:
                 self.items.move_to_end(sha256)
                 return self.items[sha256]
-        audio = prepare_bytes(read_source(storage_path), suffix)
-        feats = features.get_or_compute(audio, sha256, get_storage())
-        self.put(sha256, audio, feats)
-        return audio, feats
+        return None
+
+    def key_lock(self, sha256: str) -> threading.Lock:
+        with self.guard:
+            return self.key_locks.setdefault(sha256, threading.Lock())
+
+    def get(self, sha256: str, storage_path: str, suffix: str) -> tuple[decode.PreparedAudio, features.BaseFeatures]:
+        if (hit := self.lookup(sha256)) is not None:
+            return hit
+        with self.key_lock(sha256):
+            if (hit := self.lookup(sha256)) is not None:
+                return hit
+            data = read_source(storage_path)
+            with analysis_slots:
+                audio = prepare_bytes(data, suffix)
+                feats = features.get_or_compute(audio, sha256, get_storage())
+            self.put(sha256, audio, feats)
+            return audio, feats
 
     def put(self, sha256: str, audio: decode.PreparedAudio, feats: features.BaseFeatures) -> None:
         with self.guard:
@@ -184,10 +213,15 @@ def prepare_bytes(data: bytes, suffix: str) -> decode.PreparedAudio:
 
 
 def track_data(run: Run, track_id: str) -> TrackData:
+    """A track ready for measurement, on the grid of its current section map: a BPM or downbeat the
+    user corrected in the editor replaces the detected grid (a copy; the cached features are shared)."""
     t = run.track(track_id)
     if t is None:
         raise KeyError(track_id)
     audio, feats = audio_cache.get(t.source["sha256"], t.storage_path, Path(t.filename).suffix)
+    current = run.current_map(track_id)
+    if current is not None and current.grid_source == "user":
+        feats = dataclasses.replace(feats, grid=grid.user_grid(current.bpm, current.downbeat_s, audio.duration_s))
     return TrackData(t.id, t.display_name, t.role, audio, feats)
 
 

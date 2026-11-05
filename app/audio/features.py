@@ -55,6 +55,11 @@ class TrackData:
         return mid_signal(self.audio.signal)
 
 
+def clock(t: float) -> str:
+    """m:ss, as the section editor shows times."""
+    return f"{int(t // 60)}:{int(t % 60):02d}"
+
+
 @dataclass(frozen=True)
 class Scope:
     """A time range of one track that a measurement covers."""
@@ -62,15 +67,26 @@ class Scope:
     track: TrackData
     start_s: float
     end_s: float
-    label: str  # "Whole track", "Drop 1", ...
+    label: str  # "Whole track", "drop", "kick at 12.34 s", ...
     section_id: str | None = None
+    kind: str = "section"  # "whole" (the full file), "section" (a passage) or "event" (a kick crop)
 
     @property
     def duration_s(self) -> float:
         return self.end_s - self.start_s
 
+    @property
+    def is_whole(self) -> bool:
+        return self.kind == "whole"
+
     def describe(self) -> str:
-        return f"{self.track.name} (whole track)" if self.label == "Whole track" else f"{self.track.name}, {self.label}"
+        """Names the scope in evidence keys and captions. A section carries its time range, so two
+        sections with the same label (two drops) never share a key."""
+        if self.is_whole:
+            return f"{self.track.name} (whole track)"
+        if self.kind == "event":
+            return f"{self.track.name}, {self.label}"
+        return f"{self.track.name}, {self.label} {clock(self.start_s)}–{clock(self.end_s)}"
 
     def samples(self) -> slice:
         sr = self.track.audio.sample_rate
@@ -78,7 +94,7 @@ class Scope:
 
 
 def whole_track(track: TrackData) -> Scope:
-    return Scope(track, 0.0, track.audio.duration_s, "Whole track")
+    return Scope(track, 0.0, track.audio.duration_s, "Whole track", kind="whole")
 
 
 def mid_signal(signal: np.ndarray) -> np.ndarray:
@@ -111,13 +127,20 @@ def compute(audio: PreparedAudio, sha256: str) -> BaseFeatures:
         duration_s=audio.duration_s,
         channels=audio.channels,
         loudness=loudness.measure(audio.signal, sr),
-        grid=grid.analyse(mid, sr),
+        grid=_grid(mid, sr, audio.duration_s),
         spectra=bands.band_spectra(audio.signal, sr),
         envelopes={name: bands.band_envelope(mid, sr, band) for name, band in bands.LOW_END_BANDS.items()},
         onset_times_s=librosa.times_like(kick_env, sr=ONSET_SR, hop_length=ONSET_HOP),
         kick_onset_strength=kick_env.astype(np.float32),
         waveform=waveform,
     )
+
+
+def _grid(mid: np.ndarray, sr: int, duration_s: float) -> grid.Grid:
+    try:
+        return grid.analyse(mid, sr)
+    except ValueError:  # no steady beat (an ambient piece, a spoken intro): the user sets the grid
+        return grid.fallback(duration_s)
 
 
 # --- Cache ---

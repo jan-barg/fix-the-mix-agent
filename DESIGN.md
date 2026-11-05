@@ -181,12 +181,13 @@ Run
 ```text
 runs/{run_id}/run.json
 runs/{run_id}/trace.jsonl
-runs/{run_id}/tracks/{track_id}/original.{mp3|wav}
+runs/{run_id}/tracks/{track_id}/{sha256[:16]}.{mp3|wav}   named by content: a replaced file gets a new name, the old one is deleted
 runs/{run_id}/evidence/{evidence_id}.json      record (§6)
 runs/{run_id}/evidence/{evidence_id}.npz       arrays, when present
 runs/{run_id}/figures/{figure_id}.png
 runs/{run_id}/report/report.json | report.html | report.pdf
 cache/features/{sha256}-{config_version}.npz   whole-track base analysis, shared across runs
+cache/peaks/{sha256}-{config_version}.json     waveform peaks for the editor
 demo/audio/*.mp3, demo/corpus.json
 ```
 
@@ -195,13 +196,15 @@ demo/audio/*.mp3, demo/corpus.json
 - Cloud Run runs with `max-instances=1`, so the in-memory run cache and progress state are authoritative. Every state change is also written to `run.json`.
 - When a run is loaded with a working state (`Preparing`, `Researching`, `Writing`, …) but no active task in this process, it becomes `Interrupted`. The UI offers "Resume", which restarts the interrupted phase. Measurements already cached are reused.
 - Decoded audio stays in memory rather than in `/tmp`, because Cloud Run's filesystem is memory-backed anyway. Signals are re-decoded on demand (about 1 s per track) and dropped from an LRU cache.
+- At most two decodes and base analyses run at once (a semaphore), so concurrent uploads cannot exhaust the 8 GiB. Requests that need the same file wait for one decode (a lock per file hash), and a run is read from storage once even when several requests ask for it cold.
+- Local storage writes through a uniquely named temporary file and an atomic rename, so two writers of one path never collide.
 
 ## 5. Audio pipeline
 
 ### 5.1 Decode and normalise
 
-1. `ffprobe` reads the codec, sample rate, channels and duration, and confirms there is an audio stream.
-2. FFmpeg decodes the first audio stream to interleaved float32 at the source channel count (mono stays mono). Every track is resampled to 44.1 kHz with FFmpeg's resampler, and the original rate is recorded.
+1. `ffprobe` reads the codec, sample rate, channels and duration, and confirms there is an audio stream. The codec must match the extension (PCM for `.wav`, MP3 for `.mp3`): a FLAC file renamed `.wav` is rejected with a message saying so.
+2. FFmpeg decodes the first audio stream to interleaved float32 at the source channel count (mono stays mono). Every track is resampled to 44.1 kHz with FFmpeg's resampler, and the original rate is recorded. Decoding stops at the maximum duration plus 1 s, so a container that misreports its length cannot fill memory, and ffprobe and FFmpeg run with timeouts (30 s and 180 s). Decoded audio with NaN or infinite samples is rejected.
 3. The sample peak `p` is the maximum absolute value across all channels after decoding and resampling. Decoded MP3s can exceed full scale: the Weightless demo track decodes to a 1.168 sample peak (+1.35 dBFS). Float decoding keeps these overs, and normalisation brings them back to 0 dBFS.
 4. If `p` is below 1e-6 (−120 dBFS), the track is marked silent and normalisation is unavailable. Otherwise the gain is `1/p`, recorded in dB, and applied to every channel.
 5. The original file is stored unchanged. The normalised array is never written to disk.
@@ -212,9 +215,9 @@ Runs once per file hash and configuration version, and is stored in `cache/featu
 
 | Feature | Method | Default settings |
 |---|---|---|
-| Loudness series | `ebur128` on the normalised signal piped to FFmpeg | M, S, I, LRA every 100 ms; per-channel sample and true peaks |
-| Grid | `librosa.beat.beat_track` gives a first tempo only: its frame-quantised estimate is off by about 2 BPM (134 reads as 136). A kick-weighted onset envelope is then folded onto candidate periods within ±4 BPM (vector strength, 0.01 then 0.0005 BPM steps); a whole-number BPM wins when it lines the onsets up at least 95% as well. The grid is always one straight line of beats. Its position is the peak of the beat-folded onset envelope, with 64-beat windows weighted by how coherently their onsets align (a weighted circular mean alone sat about 25 ms late on Scars). Downbeat phase: harmonic change (beat-synchronous chroma) plus broadband onset strength, best of four. `constant_tempo` records whether the onsets support the straight grid (phase residual under 20 ms and over 80% agreement). **File start:** a beat up to 50 ms before 0 s is kept as the first beat instead of wrapping to the next period, and when the downbeat is a guess and the file starts with sound on a beat, that beat is bar 1 (a file exported from bar 1 starts there). See §5.3 for the check | 4/4 assumed; bars and 8-bar phrases derived |
-| Fractional-octave spectra | STFT power aggregated into 1/6-octave bands with overlap weighting (bins narrower than a band are split across bands), Parseval-scaled so band powers sum to the mean square (a full-scale sine reads −3 dB); L, R, mid, side and the cross-spectrum Re(L·R*) for per-band correlation | n_fft 16384, hop 4096, Hann; 20 Hz–20 kHz |
+| Loudness series | `ebur128` on the normalised signal piped to FFmpeg. Each reading is stamped with the end of its 100 ms step and looks back over its window (M 400 ms, S 3 s). The signal is padded with 100 ms of silence so the final partial step reaches the peak meters; readings that overlap the pad are dropped, and I and LRA come from the last step inside the track | M, S, I, LRA every 100 ms; per-channel sample and true peaks |
+| Grid | `librosa.beat.beat_track` gives a first tempo only: its frame-quantised estimate is off by about 2 BPM (134 reads as 136). A kick-weighted onset envelope is then folded onto candidate periods within ±4 BPM (vector strength, 0.01 then 0.0005 BPM steps); a whole-number BPM wins when it lines the onsets up at least 95% as well. The grid is always one straight line of beats. Its position is the peak of the beat-folded onset envelope, with 64-beat windows weighted by how coherently their onsets align (a weighted circular mean alone sat about 25 ms late on Scars). Downbeat phase: harmonic change (beat-synchronous chroma) plus broadband onset strength, best of four. `constant_tempo` records whether the onsets support the straight grid (phase residual under 20 ms and over 80% agreement); a track under 128 beats uses windows of half its length, so there are always two to compare. Tempo is reported within 95–190 BPM, exactly one octave, so folding always lands inside it (a 92 BPM track reads 184 and the user can halve it). **No beat:** when no grid can be built (fewer than 8 beats), a placeholder 120 BPM grid from 0 s is stored with downbeat confidence "none", and the editor asks the user to set BPM and downbeat. **File start:** a beat up to 50 ms before 0 s is kept as the first beat instead of wrapping to the next period, and when the downbeat is a guess and the file starts with sound on a beat, that beat is bar 1 (a file exported from bar 1 starts there). See §5.3 for the check | 4/4 assumed; bars and 8-bar phrases derived |
+| Fractional-octave spectra | STFT power aggregated into 1/6-octave bands with overlap weighting (bins narrower than a band are split across bands), Parseval-scaled so band powers sum to the mean square (a full-scale sine reads −3 dB); L, R, mid, side and the cross-spectrum Re(L·R*) for per-band correlation | n_fft 16384, hop 4096, Hann; 20 Hz–20 kHz. A section uses only frames whose whole 372 ms window lies inside it, so nothing leaks in from the next section |
 | Band envelopes | Zero-phase 4th-order Butterworth band-pass, then the analytic (Hilbert) envelope averaged over one period of the band's lowest frequency (at least 10 ms). A plain 10 ms RMS window ripples at a 40 Hz bass's own frequency, which looks like level movement. All envelopes share one 5 ms time axis | Bands: sub 30–60, low 60–120, upper bass 120–300, low-mid 300–600 Hz (configurable) |
 | Onsets | Kick-weighted onset strength: 32 mel bands up to 250 Hz | 22.05 kHz, hop 128 (5.8 ms) |
 | Waveform peaks | Per 10 ms bucket: sample min/max (int8) and RMS of three bands (uint8, scaled to the track's 99.5th percentile): low below 200 Hz, mid, high above 2 kHz. Base64 JSON, cached in `cache/peaks/` (about 100–200 KB per track) | 100 buckets/s |
@@ -246,10 +249,10 @@ Every tool returns an Evidence record (§6) and its figures. Settings, bands and
 
 | Tool | Scope | Outputs |
 |---|---|---|
-| `measure_loudness` | Tracks, optional sections | Integrated LUFS (whole track; for a section, computed from its 400 ms blocks with standard gating when at least 3 s long), short-term series, mean and max short-term LUFS per section, LRA, sample peak dBFS, true peak dBTP, PLR (true peak − integrated) as the dynamics descriptor, build→drop contrast in LU. Figures: loudness timeline with section shading; peak/loudness comparison |
+| `measure_loudness` | Tracks, optional sections | Integrated LUFS (whole track; for a section, computed from its 400 ms blocks with standard gating when at least 3 s long), short-term series, median and max short-term LUFS per section, LRA, sample peak dBFS, true peak dBTP, PLR (true peak − integrated) as the dynamics descriptor. A section uses only readings whose whole window lies inside it, starting 100 ms after its start while the K-weighting filters settle, so it reads as if metered on its own (selecting by timestamp let a loud drop's 3 s readings leak into the quieter outro after it). Differences are measured scalars, so the report never does arithmetic: each other track's passage minus the user's, each passage minus the one before it in the same track (build→drop contrast in LU), and the user's change minus a reference's change between passages with the same labels. Figures: loudness timeline with section shading; peak/loudness comparison |
 | `measure_tonal_balance` | Whole tracks or matched section pairs; `mode=peak_normalised` (primary) or `level_matched` (secondary, labelled) | Power-averaged 1/6-octave long-term spectrum in dB; summary energies for sub, bass, low-mid, mid, high-mid and air; difference curves against each reference or the combined target. Figures: tonal curves; difference curve |
 | `measure_stereo` | Whole tracks or section pairs | Side-to-mid ratio by 1/3-octave band in dB; L/R correlation over 400 ms windows; mono change by band = 10·log10(\|M\|² / ((\|L\|²+\|R\|²)/2)) with M = (L+R)/2, which is 0 dB for identical channels, about −3 dB for uncorrelated and −∞ for opposite polarity. Flags mono input and silent bands. Figures: side/mid by frequency; correlation timeline; mono change curve |
-| `find_kick_candidates` | One track, optional preferred ranges | Ranked on-beat kicks (the grid's kick events, so bass notes are never candidates) with timestamps and reasons, at least 4 s apart. Fullness = 30–120 Hz body peak within 120 ms, relative to the 95th percentile of the better-isolated half of the kicks (a kick over a bass note reads up to ~4 dB fuller only because the bass adds to it). Isolation = body peak above the level 90–40 ms before the onset (any later and the envelope's smoothing already shows the kick). Score = fullness, penalised 6 points per dB beyond −3 dB, + 0.5 × isolation (capped at 20) + 0.3 × decay drop 200–300 ms after the onset (capped at 30) − 0.3 × 8–16 kHz excess − 10 when the next onset of any kind is under 250 ms away. Flags: weaker or filtered variation, bass overlap (isolation under 12 dB), hats or cymbals, next onset too close. Figure: strip of the top candidates |
+| `find_kick_candidates` | One track, optional preferred ranges | Ranked on-beat kicks (the grid's kick events, so bass notes are never candidates) with timestamps and reasons, at least 4 s apart. Fullness = 30–120 Hz body peak within 120 ms (one band-pass: adding the separate sub and low envelopes read a 60 Hz kick 3 dB low at their crossover), relative to the 95th percentile of the better-isolated half of the kicks (a kick over a bass note reads up to ~4 dB fuller only because the bass adds to it). Isolation = body peak above the level 90–40 ms before the onset (any later and the envelope's smoothing already shows the kick). Score = fullness, penalised 6 points per dB beyond −3 dB, + 0.5 × isolation (capped at 20) + 0.3 × decay drop 200–300 ms after the onset (capped at 30) − 0.3 × 8–16 kHz excess − 10 when the next onset of any kind is under 250 ms away. Kicks in the first 90 ms have nothing before them to judge isolation against and are not candidates. Flags: weaker or filtered variation, bass overlap (isolation under 12 dB), hats or cymbals, next onset too close. Figure: strip of the top candidates |
 | `analyse_kick` | One candidate per track | 400 ms crop. Attack/body ratio (2–8 kHz energy in the first 15 ms vs. 40–120 Hz energy over 15–150 ms). Low-band decay time to −20 dB, unavailable if interrupted. Body peak frequency and centroid. Pitch trajectory only when the spectral peak is prominent enough. Level in the parent track's normalisation, plus an optional labelled gain-matched view. Figures: envelope overlay; kick spectrograms on one colour scale |
 | `measure_low_end` | Matched section pairs, bands | 20–300 Hz distribution (1/6 octave); kick-aligned median envelopes with interquartile range per band; recovery estimates (§5.5); upper-bass harmonic band moving with the low bands. Figures: event-aligned envelopes in ms and beat fractions; low-end spectrogram of a 4-bar passage with kick markers and a full-band companion |
 | `render_spectrogram` | Track, time range, frequency range, preset | Presets: `overview` (n_fft 4096 / hop 1024), `low_detail` (8192 / 256, up to 400 Hz), `transient` (1024 / 128). One fixed dB range for every track in a request |
@@ -260,7 +263,7 @@ Every tool returns an Evidence record (§6) and its figures. Settings, bands and
 
 ### 5.5 Ducking recovery (validated on day 2)
 
-**Kick events:** the strongest kick-weighted onset within ±40 ms of each grid beat, kept when it is at least 30% of the track's typical (90th percentile) on-beat strength.
+**Kick events:** the strongest kick-weighted onset within ±40 ms of each grid beat, kept when it is above zero, at least 30% of the track's typical (90th percentile) on-beat strength and at least 10% of its strong onsets (99th percentile anywhere), so a track without kicks does not turn every beat into one. A kick whose one-beat window (from 20 ms before it) runs outside the measured passage is left out, so the next section's low end is never read.
 
 Single events are too noisy to measure: a bass line re-articulates inside most beats. A first version required each event's own late-beat level to be steady, and it rejected every event on all four demo tracks. The estimate therefore comes from the **median across kicks**, using each band's envelope:
 
@@ -305,7 +308,8 @@ Evidence
   repro: cache_key, code_version (git SHA), file sha256s
 ```
 
-- **Cache key:** SHA-256 of the tool name, input file hashes, section boundaries used, parameters and `config_version`. Editing comments does not invalidate it; moving a boundary does.
+- **Cache key:** SHA-256 of the tool name, input file hashes, section boundaries used, each track's beat grid (BPM, first beat, downbeat phase), parameters (for kick analysis, the next-onset times that bound the decay reading) and `config_version`. Editing comments does not invalidate it; moving a boundary or correcting the grid does.
+- **Scalar names** are "<scope> | <measure>". A section scope carries its time range ("Your track, drop 1:30–2:15"), so two sections with one label never share a name. NaN and infinite values are stored as null and shown as unavailable; no stand-in number is ever reported.
 - **Captions** are generated by code from `source`, for example "Spectral comparison of your track, Drop 1, vs Reference A, Drop 1." Prose can reference them but never invents them.
 - **Researcher bundles:** each piece of evidence is a compact text summary (scalars with units, method, reliability) plus its PNG figures as image blocks. Raw arrays are never sent.
 
@@ -424,7 +428,8 @@ The frontend is one page with five views, switched by run state:
    - Split at the cursor (S), merge with the next section (M), relabel from a dropdown (custom text allowed).
    - Play, play the selected section, or play ±4 s around the nearest boundary. Starting one editor pauses the others.
    - Zoom with the buttons, +/− or ctrl/pinch-wheel; drag the waveform to scroll.
-   - BPM field and downbeat nudge (±1 beat, ±10 ms). Editing either switches to a straight user grid.
+   - BPM field and downbeat nudge (±1 beat, ±10 ms). Editing either switches to a straight user grid, which every later measurement of that track uses (pickup beats before the first downbeat included).
+   - A save that returns after further edits does not overwrite them: the newer edits stay, marked unsaved. Track names, file names and labels are escaped before they go into the page.
    - "Accept" per track saves a new map version. "Confirm all" saves any unaccepted maps as they are, then confirms. Leaving the page with unsaved edits asks first.
    - The run ID sits in the URL hash, so a reload returns to the same run and view.
 4. **Progress:** a stage line with a rotating fun message (`progress-messages.js`, e.g. "Feeling the bass thump in the chest", "Mono-Stereo-Mono-Stereo… ARGHHHHHHH") and a live trace panel.
@@ -470,18 +475,20 @@ Track colours are fixed: your track plus References 1–3, with a distinct style
 ## 12. Development and validation
 
 - **Local setup:** `uv run uvicorn app.main:app --reload` with `STORAGE=local` and `.env` holding `ANTHROPIC_API_KEY`. FFmpeg 8 and the gcloud CLI are already installed on the development machine; WeasyPrint needs `brew install pango` locally.
-- **Synthetic-signal tests** (pytest, no network), covering SPEC §12.4:
-  - Peak normalisation: 0 dBFS across channels with one shared gain; a silent input is reported unavailable.
-  - Constant gain invariance: a −6 dB copy normalises to identical measurements.
-  - Build→drop contrast survives normalisation.
-  - Band spectra: band powers add up to the mean square; a full-scale sine reads −3 dB in its band.
-  - Section loudness: integrated loudness from the momentary blocks matches FFmpeg's, gates included.
-  - Stereo: identical L/R gives 0 dB mono change and correlation 1; a polarity-flipped channel cancels; uncorrelated noise gives about −3 dB.
-  - Grid and kick events: a synthetic 128 BPM loop gives 128.00 BPM and kick events within 12 ms (median) of the true kicks.
-  - File start: the loop cut 0, 10 and 20 ms into its first kick keeps that kick's beat as bar 1 at 0 s.
-  - Ducking: a sine bass with a known sidechain envelope plus kicks recovers within tolerance; an un-ducked bass reports no dip; a changing bass line is marked unavailable (§5.5).
-  - Kicks: exposed kicks outrank kicks over a bass note, with clearly higher isolation, and are not called weaker.
-- **Agent checks on the demo corpus:**
+- **Synthetic-signal tests** (pytest, no network, about 10 s), covering SPEC §12.4. Expected values come from how each signal is built, never from the code under test:
+  - Decode and normalisation: 0 dBFS across channels with one shared gain; a silent input is reported unavailable; a −6 dB copy prepares to the identical signal and loudness; mono stays mono; too short, not audio, a FLAC renamed `.wav`, NaN samples and the decode length cap are all rejected.
+  - Metering: a full-scale 1 kHz sine reads 0 LUFS in stereo and −3 LUFS in mono; an inter-sample over reads about +3 dBTP (FFmpeg's meter overshoots this worst case by about 0.6 dB); a peak in the final partial 100 ms step is metered; build→drop contrast survives normalisation.
+  - Section loudness through the tool: a quiet outro after a loud passage reads what the outro alone reads; build→drop and user-vs-reference differences match the known 12.04 / 6.02 dB level steps; two sections with one label keep separate results; a silent break reads unavailable, not a number. Integrated loudness from the momentary blocks matches FFmpeg's, gates included.
+  - Band spectra: band powers add up to the mean square (in linear power); a full-scale sine reads −3 dB in its band; a section's spectrum contains nothing from the section before it.
+  - Stereo: identical L/R gives 0 dB mono change and correlation 1; a polarity-flipped channel cancels to the −60 dB floor; uncorrelated noise gives about −3 dB. Each test first checks that every band from 50 Hz to 16 kHz has a reading.
+  - Grid: a synthetic 128 BPM loop gives 128.00 BPM; 92, 96 and 186 BPM read 184, 96 and 186; a short track's tempo check compares two windows; a failed grid becomes the "none" placeholder and survives the cache; a user grid keeps its pickup beats; results are keyed on the grid and the next onset.
+  - File start: the loop cut 0, 10 and 20 ms into its first kick puts the first beat on that kick (within 20 ms) and no more than 50 ms before 0 s, as bar 1.
+  - Kick events: at least 95% of the true kicks found, 90% within 15 ms, nothing extra; no onsets means no events; kicks whose window runs past a passage are left out.
+  - Ducking: a sine bass with a known sidechain envelope plus kicks recovers within tolerance; an un-ducked bass reports no dip; a changing bass line is marked unavailable; noise without kicks reports no ducking in any band (§5.5).
+  - Kicks: exposed kicks outrank kicks over a bass note, with clearly higher isolation, and are not called weaker; the body band reads 45, 60 and 90 Hz tones within 0.5 dB.
+  - Runs: concurrent requests for one file decode it once; measurements use the grid the user set; concurrent writes to one path do not collide.
+  - Not covered by tests: the browser editor (escaping, the save race) is checked by hand; the constant-tempo check can miss a tempo change or phase jump when one part of the track does not line up at all, because such windows get almost no weight.
+- **Agent checks on the demo corpus** (days 4–6, not yet in place):
   - A vague request triggers clarification.
   - A round-2 follow-up actually happens.
   - Researchers overlap in the trace.

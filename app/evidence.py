@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+import numpy as np
+
 from app.audio.features import Scope
 from app.config import settings
 
@@ -67,10 +69,15 @@ def new_id(prefix: str = "ev") -> str:
 
 
 def cache_key(tool: str, scopes: list[Scope], params: dict[str, Any]) -> str:
-    """Everything that affects a result: tool, file hashes, exact ranges, parameters, config version."""
+    """Everything that affects a result: tool, file hashes, exact ranges, the beat grid (kick events
+    and recovery-in-beats depend on it, and the user can replace it), parameters, config version."""
+    def grid_id(s: Scope) -> list:
+        g = s.track.features.grid
+        return [round(g.bpm, 4), round(float(g.beats_s[0]), 4) if len(g.beats_s) else None, g.downbeat_phase]
+
     payload = {
         "tool": tool,
-        "scopes": [[s.track.features.sha256, round(s.start_s, 3), round(s.end_s, 3)] for s in scopes],
+        "scopes": [[s.track.features.sha256, round(s.start_s, 3), round(s.end_s, 3), grid_id(s)] for s in scopes],
         "params": params,
         "config": settings.config_version,
     }
@@ -93,9 +100,15 @@ def source(scopes: list[Scope], signal: str = "peak_normalised") -> dict[str, An
     }
 
 
-def scalar(value: float | int | None, unit: str = "") -> dict[str, Any]:
-    if isinstance(value, float):
-        value = None if value != value else round(value, 3)  # NaN → unavailable
+def scalar(value: float | int | str | None, unit: str = "") -> dict[str, Any]:
+    """A reported number. NaN and ±inf (a silent passage's loudness, an undefined ratio) become None,
+    "unavailable", so no sentinel value can be quoted as a measurement."""
+    if isinstance(value, (bool, np.bool_)):
+        value = bool(value)
+    elif isinstance(value, (int, np.integer)):
+        value = int(value)
+    elif isinstance(value, (float, np.floating)):
+        value = round(float(value), 3) if np.isfinite(value) else None
     return {"value": value, "unit": unit}
 
 

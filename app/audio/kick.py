@@ -40,9 +40,10 @@ class KickCandidate:
 
 
 def _body_envelope(track: TrackData) -> bands.Envelope:
-    env = track.features.envelopes
-    power = 10 ** (env["sub"].level_db / 10) + 10 ** (env["low"].level_db / 10)
-    return bands.Envelope(env["sub"].times_s, bands.db(power).astype(np.float32), BODY_BAND)
+    """30-120 Hz envelope of the mid signal, filtered as one band. (Adding the cached sub and low
+    envelopes instead dips about 3 dB at their 60 Hz crossover, where zero-phase filtering puts
+    each band 6 dB down, so a 60 Hz kick would read weaker than a 45 Hz one.)"""
+    return bands.band_envelope(track.mid, track.audio.sample_rate, BODY_BAND)
 
 
 def _mean_db(times, level, lo, hi) -> float:
@@ -67,14 +68,17 @@ def find_candidates(track: TrackData, ranges: list[tuple[float, float]] | None =
     peaks = np.array([np.max(body.level_db[(body.times_s >= t) & (body.times_s < t + BODY_PEAK_WINDOW_S)], initial=-200.0)
                       for t in kicks])
     before = np.array([_mean_db(body.times_s, body.level_db, t - PRE_WINDOW_S[0], t - PRE_WINDOW_S[1]) for t in kicks])
-    isolations = peaks - before
+    isolations = peaks - before  # NaN for a kick in the first 90 ms: nothing before it to compare
+    measurable = np.isfinite(isolations)
+    if not measurable.any():
+        return []
     # Fullness is judged against the strongest of the better-isolated half of the kicks: a kick over a
     # bass note can read up to ~4 dB louder in the body band only because the bass adds to it.
-    reference_peak = float(np.percentile(peaks[isolations >= np.median(isolations)], 95))
+    reference_peak = float(np.percentile(peaks[measurable & (isolations >= np.median(isolations[measurable]))], 95))
 
     candidates = []
     for i, t in enumerate(kicks):
-        if ranges and not any(lo <= t < hi for lo, hi in ranges):
+        if not measurable[i] or (ranges and not any(lo <= t < hi for lo, hi in ranges)):
             continue
         later = onsets[onsets > t + OWN_ATTACK_S]
         gap = float(later[0] - t) if later.size else float(track.audio.duration_s - t)

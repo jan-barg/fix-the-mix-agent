@@ -1,6 +1,6 @@
 // Fix the Mix front end: upload → sections → confirmed (DESIGN.md §9). The run ID lives in the URL
 // hash, so a reload returns to the same run.
-import { SectionEditor, TRACK_COLOURS, labelColour, fmtTime, errorText } from "/static/editor.js";
+import { SectionEditor, TRACK_COLOURS, labelColour, fmtTime, errorText, esc } from "/static/editor.js";
 
 const MAX_BYTES = 30 * 1024 * 1024;
 const TOO_LARGE = "That file is larger than 30 MB. Please export an MP3 (320 kbps works well) and upload that instead.";
@@ -172,7 +172,7 @@ async function prepare() {
         const g = res.track.grid;
         setStatus(id, "ok", `✓ Ready · ${fmtTime(res.track.source.duration_s)} · ${g.bpm.toFixed(g.bpm % 1 ? 2 : 0)} BPM`);
       } catch (err) {
-        setStatus(id, "err", err.message);
+        setStatus(id, "err", esc(err.message));
         throw err;
       }
     }));
@@ -251,9 +251,9 @@ async function confirmAll() {
 function renderSummary() {
   $("#summary").innerHTML = state.run.tracks.map((t) => {
     const maps = state.run.section_maps[t.id], m = maps[maps.length - 1];
-    const pills = m.sections.map((s) => `<span class="pill" style="background:${labelColour(s.label)}" title="${fmtTime(s.start_s)}–${fmtTime(s.end_s)}">${s.label} · ${s.end_bar - s.start_bar} bars</span>`).join("");
+    const pills = m.sections.map((s) => `<span class="pill" style="background:${labelColour(s.label)}" title="${fmtTime(s.start_s)}–${fmtTime(s.end_s)}">${esc(s.label)} · ${s.end_bar - s.start_bar} bars</span>`).join("");
     return `<div class="summary-row" style="--c:${TRACK_COLOURS[t.id]}">
-      <div class="ed-head"><span class="dot"></span><span class="ed-title">${t.display_name}</span><span class="ed-file">${t.filename}</span>
+      <div class="ed-head"><span class="dot"></span><span class="ed-title">${esc(t.display_name)}</span><span class="ed-file">${esc(t.filename)}</span>
       <span class="spacer"></span><span class="badge">${m.bpm.toFixed(2)} BPM · ${m.grid_source === "user" ? "your grid" : "detected grid"}</span></div>
       <div class="pills">${pills}</div></div>`;
   }).join("");
