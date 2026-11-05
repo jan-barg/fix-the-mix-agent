@@ -1,0 +1,44 @@
+{
+  "description": "One-click demo and development corpus. Audio is not in git: local copies live in demo/audio/, deployed copies in the bucket under demo/audio/. Real use analyses whatever the user uploads.",
+  "global_comment": "",
+  "tracks": [
+    {
+      "file": "scars-extended.mp3",
+      "role": "user",
+      "title": "Jan Barg, ALPHUH - Scars (Extended Mix)",
+      "origin": "The author's own release (Spotify master).",
+      "comment": ""
+    },
+    {
+      "file": "endless-light-radio-edit.mp3",
+      "role": "reference",
+      "slot": 1,
+      "title": "Jan Barg, Ønawa, Jeza - Endless Light (Radio Edit)",
+      "origin": "The author's own release (Spotify master).",
+      "comment": ""
+    },
+    {
+      "file": "fein-jan-barg-remix.mp3",
+      "role": "reference",
+      "slot": 2,
+      "title": "FE!N (Jan Barg Remix)",
+      "origin": "The author's remix (master). Contains third-party material; not redistributed in the repository.",
+      "comment": ""
+    },
+    {
+      "file": "weightless-extended.mp3",
+      "role": "reference",
+      "slot": 3,
+      "title": "it's murph - Weightless (w/ Arlo & Allegra Miles) (Extended)",
+      "origin": "Third-party release, supplied by the author as a reference. Not redistributed in the repository.",
+      "comment": ""
+    }
+  ],
+  "spares": [
+    {
+      "file": "scars-radio.mp3",
+      "title": "Jan Barg, ALPHUH - Scars (Radio Edit)",
+      "origin": "The author's own release (Spotify master). Same song as the demo's user track in a shorter arrangement; useful for testing section matching."
+    }
+  ]
+}

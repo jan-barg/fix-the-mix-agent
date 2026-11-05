@@ -1,0 +1,14 @@
+# Never send secrets, local data or audio into the image.
+.env
+.env.*
+.data/
+demo/audio/
+*.wav
+*.mp3
+
+.git/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store

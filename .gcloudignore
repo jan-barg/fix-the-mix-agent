@@ -1,0 +1,17 @@
+# Files not uploaded to Cloud Build by `gcloud run deploy --source`.
+# Same rules as .dockerignore: no secrets, local data or audio.
+.gcloudignore
+.env
+.env.*
+.data/
+demo/audio/
+*.wav
+*.mp3
+
+.git/
+.gitignore
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
