@@ -1,9 +1,10 @@
 """Every chart, drawn only from measured arrays (SPEC §8.2).
 
-One dark, studio-style look shared with the app (static/styles.css) and the report template: the same
-background, ink and track colours, so a chart reads as part of the page it sits on. Track colours are
-fixed for the whole report: your track, References 1-3 and a combined target. Comparisons share axes
-and colour scales so equal levels look equal. Titles live in the report's captions, not in the image.
+Each chart is a dark display set into the light report, like the section editor's waveform screen
+(static/editor.js): the same screen colours, your track in the app's orange. Track colours are fixed for
+the whole report: your track, References 1-3 and a combined target; the report's track cards use the same
+ones. Comparisons share axes and colour scales so equal levels look equal. Titles live in the report's
+captions, not in the image.
 """
 
 import io
@@ -14,21 +15,25 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.ticker import FuncFormatter  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from app.audio import bands  # noqa: E402
 
-# The app's palette (static/styles.css): background, ink and the shared track colours.
-BG, INK, INK_2, MUTED = "#111419", "#eceef1", "#b6bdc6", "#7d8692"
-GRID, AXIS, ZERO = "#1f242c", "#353c47", "#59616d"
-TRACK_COLOURS = {"user": "#ef5b6b", "ref1": "#3fa7d6", "ref2": "#4cc27a", "ref3": "#a98be0", "combined": "#e6e8eb"}
+# The section editor's screen (static/editor.js): background, ink, and track colours lifted for a dark ground.
+BG, INK, INK_2, MUTED = "#0e1115", "#eef1f5", "#c3cad4", "#8b95a3"
+GRID, AXIS, ZERO = "#1b2027", "#2a3039", "#4a525e"
+TRACK_COLOURS = {"user": "#f2763a", "ref1": "#5fb6d0", "ref2": "#9ccc64", "ref3": "#b39ae6", "combined": "#d5d9df"}
+NEGATIVE = "#ff5d73"  # opposite polarity in the correlation chart
 # Section colours of the section editor (static/editor.js).
-SECTION_COLOURS = {"intro": "#5b8def", "build": "#f2b134", "drop": "#ef4b5f", "breakdown": "#3fbf8f", "verse": "#8f7cf0",
-                   "chorus": "#f07cc0", "bridge": "#5cc9e6", "outro": "#7a86a8", "unknown": "#5d6672"}
-CUSTOM_SECTION = "#b59a6a"
-SPECTRO_CMAP = "magma"
+SECTION_COLOURS = {"intro": "#a9bedb", "build": "#e6c27a", "drop": "#e2907a", "breakdown": "#9fcbb4", "verse": "#bdb0dc",
+                   "chorus": "#e7a9c2", "bridge": "#9dcfd9", "outro": "#b3b8c4", "unknown": "#d2d5da"}
+CUSTOM_SECTION = "#d3bf98"
+# Spectrograms glow from the screen's black through the app's orange to white.
+SPECTRO_CMAP = LinearSegmentedColormap.from_list(
+    "ember", ["#0e1115", "#2a1a14", "#7a2f12", "#e8622a", "#f6b48e", "#fff4ec"])
 # 7.5 in at 200 dpi: 1500 px wide. Text sizes are in points, so the narrower figure keeps labels readable
 # where the report shows a chart (about 700 px on screen, 6.7 in on an A4 page).
 WIDTH_IN, DPI = 7.5, 200
@@ -278,7 +283,7 @@ def correlation_timeline(results: list[dict]) -> bytes:
         c = colour(r["track_id"])
         corr = np.asarray(r["correlation"])
         ax.fill_between(r["times_s"], corr, 0, where=corr >= 0, color=c, alpha=0.14, lw=0, interpolate=True)
-        ax.fill_between(r["times_s"], corr, 0, where=corr < 0, color="#ff6b6b", alpha=0.35, lw=0, interpolate=True)
+        ax.fill_between(r["times_s"], corr, 0, where=corr < 0, color=NEGATIVE, alpha=0.35, lw=0, interpolate=True)
         ax.plot(r["times_s"], corr, color=c, lw=1.0)
         _zero(ax)
         ax.set_ylim(-1, 1.05)
@@ -436,7 +441,7 @@ def spectrograms(panels: list[dict], preset: str, fmin: float = 20.0, fmax: floa
             ax.set_yscale("log")
             ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v / 1000:g}k" if v >= 1000 else f"{v:g}"))
         for m in (markers or {}).get(panel["track_id"], []):
-            ax.axvline(m, color="#9fe8ff", lw=0.9, alpha=0.75)
+            ax.axvline(m, color=INK, lw=0.9, alpha=0.6)
         ax.set_title(panel["label"], color=colour(panel["track_id"]), fontsize=8.8)
         ax.set_ylabel("Hz")
         ax.grid(False)
