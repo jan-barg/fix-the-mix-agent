@@ -345,17 +345,41 @@ def figure(run_id: str, figure_id: str):
 # --- Demo ---
 
 
-def _demo_track(entry: dict) -> tuple[dict, TrackData, dict, str]:
-    tid, display = _track_id(entry["role"], entry.get("slot"))
+def _demo_track(entry: dict) -> tuple[dict, TrackData | None, dict | None, str]:
+    """One demo track. A frozen track whose analysis is cached needs no download or decode here: its
+    record and checked section map come from the corpus, and the audio is decoded when first measured."""
     path = f"demo/audio/{entry['file']}"
+    frozen = entry.get("frozen")
+    storage = get_storage()
+    if frozen and storage.exists(features.cache_path(frozen["sha256"])) and storage.exists(peaks.cache_path(frozen["sha256"])):
+        return entry, None, None, path
+    tid, display = _track_id(entry["role"], entry.get("slot"))
     data = runs.read_source(path)
     td, source = _analyse(tid, display, entry["role"], data, Path(entry["file"]).suffix.lower())
     return entry, td, source, path
 
 
+def _install_frozen(run: Run, entry: dict, path: str) -> None:
+    f = entry["frozen"]
+    tid, display = _track_id(entry["role"], entry.get("slot"))
+    record = TrackRecord(id=tid, role=entry["role"], slot=entry.get("slot"), display_name=display,
+                         filename=entry["title"] + Path(entry["file"]).suffix, comment=entry.get("comment", ""),
+                         storage_path=path, source=f["source"], prep=f["prep"], grid=runs.GridInfo(**f["grid"]))
+    run.tracks = sorted([t for t in run.tracks if t.id != tid] + [record], key=lambda t: (t.role != "user", t.slot or 0))
+    run.section_maps[tid] = [_frozen_map(f)]
+
+
+def _frozen_map(f: dict) -> SectionMap:
+    """The section map the producer checked for this demo track (scripts/freeze_demo.py)."""
+    m = f["map"]
+    return SectionMap(version=1, origin="checked", bpm=m["bpm"], downbeat_s=m["downbeat_s"], grid_source=m["grid_source"],
+                      sections=[{**s, "label_confidence": None} for s in m["sections"]])
+
+
 @router.post("/demo")
 def create_demo():
-    """A run from the demo corpus, so graders get a reproducible run without uploading anything."""
+    """A run from the demo corpus, so graders get a reproducible run without uploading anything. Tracks
+    frozen in the corpus start from the producer's checked section maps."""
     corpus = json.loads((ROOT / "demo" / "corpus.json").read_text())
     entries = [e for e in corpus["tracks"] if e["role"] == "user" or e.get("slot")]
     try:
@@ -367,8 +391,14 @@ def create_demo():
     with runs.lock(run.id):
         run.comments["global"] = corpus.get("global_comment", "")
         for entry, td, source, path in prepared:
-            _install(run, td, source, slot=entry.get("slot"), filename=entry["title"] + Path(entry["file"]).suffix,
-                     comment=entry.get("comment", ""), storage_path=path)
+            if td is None:
+                _install_frozen(run, entry, path)
+                continue
+            record = _install(run, td, source, slot=entry.get("slot"), filename=entry["title"] + Path(entry["file"]).suffix,
+                              comment=entry.get("comment", ""), storage_path=path)
+            frozen = entry.get("frozen")
+            if frozen and frozen["sha256"] == source["sha256"]:  # analysed again (cache gone), still the checked map
+                run.section_maps[record.id] = [_frozen_map(frozen)]
         runs.set_state(run, "Preparing")
         runs.set_state(run, "ReviewingSections")
         runs.save(run)

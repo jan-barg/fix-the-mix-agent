@@ -56,7 +56,7 @@ class TrackRecord(BaseModel):
 
 class SectionMap(BaseModel):
     version: int
-    origin: str  # "proposed" or "user"
+    origin: str  # "proposed", "user", or "checked" (a demo map the producer checked, from demo/corpus.json)
     created_at: str = Field(default_factory=now)
     accepted: bool = False
     confirmed: bool = False

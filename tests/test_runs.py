@@ -1,6 +1,7 @@
 """Run state under concurrency, and the grid a measurement runs on (DESIGN.md §4, §12)."""
 
 import dataclasses
+import json
 import threading
 import time
 from types import SimpleNamespace
@@ -81,3 +82,61 @@ def test_concurrent_writes_to_one_path_do_not_collide(tmp_path):
     assert not errors
     assert storage.read("cache/features/x.npz") in payloads
     assert storage.list("cache") == ["cache/features/x.npz"]  # no temporary files left behind
+
+
+def test_demo_runs_start_from_the_frozen_maps_without_decoding(tmp_path, monkeypatch):
+    from app import api
+    from app.audio import features, peaks
+
+    storage = LocalStorage(tmp_path / "data")
+    for mod in (runs, api):
+        monkeypatch.setattr(mod, "get_storage", lambda: storage)
+    monkeypatch.setattr("app.storage.get_storage", lambda: storage)
+    monkeypatch.setattr(runs, "_runs", {})
+    frozen_map = {"bpm": 134.0, "downbeat_s": 0.5, "grid_source": "user",
+                  "sections": [{"id": "s1", "label": "intro", "start_s": 0.0, "end_s": 30.0, "start_bar": 1, "end_bar": 18},
+                               {"id": "s2", "label": "drop", "start_s": 30.0, "end_s": 60.0, "start_bar": 18, "end_bar": 35}]}
+
+    def entry(file, role, slot, sha):
+        return {"file": file, "role": role, "slot": slot, "title": file.upper(), "comment": "c", "frozen": {
+            "sha256": sha, "source": {"sha256": sha, "duration_s": 60.0, "bytes": 1}, "prep": {},
+            "grid": {"bpm": 134.0, "first_beat_s": 0.0, "downbeat_s": 0.5, "downbeat_confidence": "guess",
+                     "constant_tempo": True}, "map": frozen_map}}
+
+    corpus = {"global_comment": "g", "tracks": [entry("a.mp3", "user", None, "aaa"), entry("b.mp3", "reference", 1, "bbb")]}
+    (tmp_path / "demo").mkdir()
+    (tmp_path / "demo" / "corpus.json").write_text(json.dumps(corpus))
+    monkeypatch.setattr(api, "ROOT", tmp_path)
+    for sha in ("aaa", "bbb"):
+        storage.write(features.cache_path(sha), b"x")
+        storage.write(peaks.cache_path(sha), b"x")
+
+    def no_audio(path):
+        raise AssertionError(f"read {path}")
+
+    monkeypatch.setattr(runs, "read_source", no_audio)
+    run = api.create_demo()
+    assert [t["id"] for t in run["tracks"]] == ["user", "ref1"]
+    m = run["section_maps"]["ref1"][0]
+    assert m["origin"] == "checked" and not m["confirmed"] and m["grid_source"] == "user"
+    assert [s["label"] for s in m["sections"]] == ["intro", "drop"]
+    assert run["state"] == "ReviewingSections"
+
+    # Without the cached analysis the track is analysed again, and still starts from the checked map.
+    storage.delete(features.cache_path("bbb"))
+    analysed = []
+
+    def analyse(tid, display, role, data, suffix):
+        analysed.append(tid)
+        audio = SimpleNamespace(duration_s=60.0, applied_gain_db=0.0, original_peak_dbfs=0.0, silent=False, resampled_from=None)
+        g = grid.Grid(bpm=128.0, beats_s=np.arange(0.0, 60.0, 60 / 128), downbeat_phase=0, downbeat_confidence="guess",
+                      constant_tempo=True, beat_residual_s=0.0)
+        td = SimpleNamespace(id=tid, name=display, role=role, audio=audio, features=SimpleNamespace(grid=g))
+        return td, {"sha256": "bbb", "duration_s": 60.0}
+
+    monkeypatch.setattr(runs, "read_source", lambda path: b"audio")
+    monkeypatch.setattr(api, "_analyse", analyse)
+    monkeypatch.setattr(api.sections, "propose", lambda td: [])
+    run = api.create_demo()
+    assert analysed == ["ref1"]
+    assert run["section_maps"]["ref1"][0]["origin"] == "checked"

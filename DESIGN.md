@@ -144,7 +144,7 @@ The Lead keeps one append-only conversation per run (§7.1). Every user message 
 | `POST /api/runs/{run}/sections/confirm` | Mark all current maps as confirmed |
 | `GET /api/runs/{run}/figures/{figure_id}` | A figure PNG from the run's evidence |
 | `GET /api/runs/{run}/report`, `/report.pdf` | Report artifacts (day 5) |
-| `POST /api/demo` | Create a run from the demo corpus without uploading |
+| `POST /api/demo` | Create a run from the demo corpus without uploading. Frozen tracks (below) start from their checked section maps without a download or decode |
 | `GET /api/health` | Liveness check (`/healthz` is reserved on `run.app`) |
 
 Run IDs are random UUIDs and work as capability URLs. There is no endpoint that lists runs.
@@ -543,6 +543,8 @@ Real use always analyses whatever the user uploads. The files in `demo/audio/` a
 
 Roles and comments for the demo live in `demo/corpus.json` and can change without code changes.
 
+**Checked section maps.** The proposed sections for the demo tracks have known mistakes, and every demo run would start from them. Instead, the producer corrects the maps once in the editor (accepting each track) and `scripts/freeze_demo.py RUN_ID` writes a `frozen` block per track into `demo/corpus.json`: the file hash, file details, detected grid and the corrected map. `POST /api/demo` then builds each frozen track from that block, with its map marked `checked` (still editable), as long as the track's base analysis and peaks are cached for the current config version. It does not download, hash or decode the audio; the first measurement decodes it (about 0.4 s per track). If the cache is missing, the track is analysed again and still starts from the checked map when the file hash matches. Re-freeze after replacing demo audio. Locally this took demo setup from 0.9 s cold to 2 ms; on Cloud Run it was 5–34 s, mostly the 42 MB download from the bucket.
+
 ## 13. Schedule
 
 | Day | Date | Work | Done when |
@@ -563,6 +565,7 @@ If the schedule slips, cut in this order: kick pitch trajectory → section-labe
 |---|---|
 | Visual design pass for charts and the report. The figures are correct but look like plain matplotlib; they need a designed, polished look (typography, palette, spacing, consistent with the web report and PDF). Content and data stay as they are | Day 5 |
 | Comments and reference roles for the demo corpus (`demo/corpus.json`): drafted on November 5 for the demo runs; the producer should confirm or replace them | Day 5 |
+| Checked section maps for the demo tracks: the producer corrects them in the editor, then `scripts/freeze_demo.py` | Day 5 |
 | The values check flags any unexplained frequency in comparisons and interpretations ("around 90 Hz"), and the Lead rejected a few otherwise sound interpretations for it. Loosen for Hz if the report loses useful findings | Day 5 |
 | The Lead's chat replies (brief summary, follow-up answers) are not run through the report's number validation; the prompt asks it to quote measured values only | Day 5 |
 | BPM and drop timestamps of the demo tracks from the producer, to check the grid and section proposals (detected: Scars Extended and Radio 134, Endless Light 134, FE!N 136, Weightless 130; the producer called the 134.07 reading on Scars a detection error) | Day 4 |

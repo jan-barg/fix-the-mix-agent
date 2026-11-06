@@ -7,7 +7,123 @@
       "role": "user",
       "title": "Jan Barg, ALPHUH - Scars (Extended Mix)",
       "origin": "The author's own release (Spotify master).",
-      "comment": "This is the mastered version. The kick feels a bit buried under the bass in the drops."
+      "comment": "This is the mastered version. The kick feels a bit buried under the bass in the drops.",
+      "frozen": {
+        "sha256": "c35b77bb0d17e27a866044830350f876d047e2697730bcb24c6bae4781a05d43",
+        "source": {
+          "bytes": 11820929,
+          "channels": 2,
+          "codec": "mp3",
+          "decode_warnings": [
+            "[mp3 @ 0x55bd470390c0] Estimating duration from bitrate, this may be inaccurate"
+          ],
+          "duration_s": 295.5232653061224,
+          "format": "mp3",
+          "sample_rate": 44100,
+          "sha256": "c35b77bb0d17e27a866044830350f876d047e2697730bcb24c6bae4781a05d43"
+        },
+        "prep": {
+          "applied_gain_db": -1.0953381256213441,
+          "original_sample_peak_dbfs": 1.0953381256213441,
+          "resampled_from": null,
+          "silent": false
+        },
+        "grid": {
+          "bpm": 134.0,
+          "first_beat_s": 0.0815,
+          "downbeat_s": 1.4247,
+          "downbeat_confidence": "guess",
+          "constant_tempo": false
+        },
+        "map": {
+          "bpm": 134.0,
+          "downbeat_s": 1.4247,
+          "grid_source": "detected",
+          "sections": [
+            {
+              "id": "s1",
+              "label": "intro",
+              "start_s": 0.0,
+              "end_s": 42.619,
+              "start_bar": 0,
+              "end_bar": 24
+            },
+            {
+              "id": "s2",
+              "label": "verse",
+              "start_s": 42.619,
+              "end_s": 78.44,
+              "start_bar": 24,
+              "end_bar": 44
+            },
+            {
+              "id": "s4",
+              "label": "build",
+              "start_s": 78.44,
+              "end_s": 107.096,
+              "start_bar": 44,
+              "end_bar": 60
+            },
+            {
+              "id": "s5",
+              "label": "drop",
+              "start_s": 107.096,
+              "end_s": 135.753,
+              "start_bar": 60,
+              "end_bar": 76
+            },
+            {
+              "id": "s6",
+              "label": "bridge",
+              "start_s": 135.753,
+              "end_s": 150.081,
+              "start_bar": 76,
+              "end_bar": 84
+            },
+            {
+              "id": "nmw4b7yil",
+              "label": "verse",
+              "start_s": 150.081,
+              "end_s": 178.738,
+              "start_bar": 84,
+              "end_bar": 100
+            },
+            {
+              "id": "nmw4b8jsw",
+              "label": "chorus",
+              "start_s": 178.738,
+              "end_s": 207.395,
+              "start_bar": 100,
+              "end_bar": 116
+            },
+            {
+              "id": "s7",
+              "label": "build",
+              "start_s": 207.395,
+              "end_s": 225.305,
+              "start_bar": 116,
+              "end_bar": 126
+            },
+            {
+              "id": "nmw4b96bo",
+              "label": "build",
+              "start_s": 225.305,
+              "end_s": 250.38,
+              "start_bar": 126,
+              "end_bar": 140
+            },
+            {
+              "id": "s8",
+              "label": "outro",
+              "start_s": 250.38,
+              "end_s": 295.523,
+              "start_bar": 140,
+              "end_bar": 166
+            }
+          ]
+        },
+        "from_run": "bd30c227-956c-4f45-bb66-ec8a930a777a"
+      }
     },
     {
       "file": "endless-light-radio-edit.mp3",
@@ -15,7 +131,115 @@
       "slot": 1,
       "title": "Jan Barg, Ønawa, Jeza - Endless Light (Radio Edit)",
       "origin": "The author's own release (Spotify master).",
-      "comment": "Use this for kick and bass weight in the drop."
+      "comment": "Use this for kick and bass weight in the drop.",
+      "frozen": {
+        "sha256": "096bafcce66e2598e3f301c11a56715d089e402f7463216f0c96f9779e2ccc79",
+        "source": {
+          "bytes": 10604689,
+          "channels": 2,
+          "codec": "mp3",
+          "decode_warnings": [
+            "[mp3 @ 0x55a0280360c0] Estimating duration from bitrate, this may be inaccurate"
+          ],
+          "duration_s": 265.09061224489795,
+          "format": "mp3",
+          "sample_rate": 44100,
+          "sha256": "096bafcce66e2598e3f301c11a56715d089e402f7463216f0c96f9779e2ccc79"
+        },
+        "prep": {
+          "applied_gain_db": -1.1087708905122018,
+          "original_sample_peak_dbfs": 1.1087708905122018,
+          "resampled_from": null,
+          "silent": false
+        },
+        "grid": {
+          "bpm": 134.0,
+          "first_beat_s": 0.1084,
+          "downbeat_s": 0.1084,
+          "downbeat_confidence": "likely",
+          "constant_tempo": false
+        },
+        "map": {
+          "bpm": 134.0,
+          "downbeat_s": 0.1084,
+          "grid_source": "detected",
+          "sections": [
+            {
+              "id": "s1",
+              "label": "intro",
+              "start_s": 0.0,
+              "end_s": 3.69,
+              "start_bar": 0,
+              "end_bar": 3
+            },
+            {
+              "id": "s2",
+              "label": "verse",
+              "start_s": 3.69,
+              "end_s": 46.676,
+              "start_bar": 3,
+              "end_bar": 27
+            },
+            {
+              "id": "nmw4bak88",
+              "label": "drop",
+              "start_s": 46.676,
+              "end_s": 103.989,
+              "start_bar": 27,
+              "end_bar": 59
+            },
+            {
+              "id": "s3",
+              "label": "verse",
+              "start_s": 103.989,
+              "end_s": 118.317,
+              "start_bar": 59,
+              "end_bar": 67
+            },
+            {
+              "id": "nmw4bbdgv",
+              "label": "breakdown",
+              "start_s": 118.317,
+              "end_s": 146.974,
+              "start_bar": 67,
+              "end_bar": 83
+            },
+            {
+              "id": "nmw4bbweh",
+              "label": "hands up",
+              "start_s": 146.974,
+              "end_s": 175.631,
+              "start_bar": 83,
+              "end_bar": 99
+            },
+            {
+              "id": "s4",
+              "label": "build",
+              "start_s": 175.631,
+              "end_s": 204.288,
+              "start_bar": 99,
+              "end_bar": 115
+            },
+            {
+              "id": "nmw4bcij5",
+              "label": "drop",
+              "start_s": 204.288,
+              "end_s": 261.601,
+              "start_bar": 115,
+              "end_bar": 147
+            },
+            {
+              "id": "nmw4bcr0x",
+              "label": "outro",
+              "start_s": 261.601,
+              "end_s": 265.091,
+              "start_bar": 147,
+              "end_bar": 149
+            }
+          ]
+        },
+        "from_run": "bd30c227-956c-4f45-bb66-ec8a930a777a"
+      }
     },
     {
       "file": "fein-jan-barg-remix.mp3",
@@ -23,7 +247,123 @@
       "slot": 2,
       "title": "FE!N (Jan Barg Remix)",
       "origin": "The author's remix (master). Contains third-party material; not redistributed in the repository.",
-      "comment": "Use this for the jump in loudness from the build into the drop."
+      "comment": "Use this for the jump in loudness from the build into the drop.",
+      "frozen": {
+        "sha256": "023530dd6b3d477bfc620faededc7ec80a1642f1b69ae6dc3b00c83c34dba2e8",
+        "source": {
+          "bytes": 5999803,
+          "channels": 2,
+          "codec": "mp3",
+          "decode_warnings": [
+            "[mp3 @ 0x56203c9f10c0] Estimating duration from bitrate, this may be inaccurate"
+          ],
+          "duration_s": 149.99510204081633,
+          "format": "mp3",
+          "sample_rate": 44100,
+          "sha256": "023530dd6b3d477bfc620faededc7ec80a1642f1b69ae6dc3b00c83c34dba2e8"
+        },
+        "prep": {
+          "applied_gain_db": -0.5862030156577968,
+          "original_sample_peak_dbfs": 0.5862030156577968,
+          "resampled_from": null,
+          "silent": false
+        },
+        "grid": {
+          "bpm": 136.0,
+          "first_beat_s": 0.0791,
+          "downbeat_s": 1.4027,
+          "downbeat_confidence": "guess",
+          "constant_tempo": false
+        },
+        "map": {
+          "bpm": 136.0,
+          "downbeat_s": 1.4027,
+          "grid_source": "detected",
+          "sections": [
+            {
+              "id": "s1",
+              "label": "intro",
+              "start_s": 0.0,
+              "end_s": 6.697,
+              "start_bar": 0,
+              "end_bar": 4
+            },
+            {
+              "id": "s2",
+              "label": "breakdown",
+              "start_s": 6.697,
+              "end_s": 20.814,
+              "start_bar": 4,
+              "end_bar": 12
+            },
+            {
+              "id": "s3",
+              "label": "verse",
+              "start_s": 20.814,
+              "end_s": 34.932,
+              "start_bar": 12,
+              "end_bar": 20
+            },
+            {
+              "id": "s4",
+              "label": "drop",
+              "start_s": 34.932,
+              "end_s": 63.167,
+              "start_bar": 20,
+              "end_bar": 36
+            },
+            {
+              "id": "nmw4be009",
+              "label": "breakdown",
+              "start_s": 63.167,
+              "end_s": 77.285,
+              "start_bar": 36,
+              "end_bar": 44
+            },
+            {
+              "id": "nmw4beb1d",
+              "label": "verse",
+              "start_s": 77.285,
+              "end_s": 93.167,
+              "start_bar": 44,
+              "end_bar": 53
+            },
+            {
+              "id": "s5",
+              "label": "bridge",
+              "start_s": 93.167,
+              "end_s": 101.991,
+              "start_bar": 53,
+              "end_bar": 58
+            },
+            {
+              "id": "nmw4belv3",
+              "label": "build",
+              "start_s": 101.991,
+              "end_s": 116.109,
+              "start_bar": 58,
+              "end_bar": 66
+            },
+            {
+              "id": "s6",
+              "label": "drop",
+              "start_s": 116.109,
+              "end_s": 144.344,
+              "start_bar": 66,
+              "end_bar": 82
+            },
+            {
+              "id": "nmw4bfdo4",
+              "label": "outro",
+              "start_s": 144.344,
+              "end_s": 149.995,
+              "start_bar": 82,
+              "end_bar": 86
+            }
+          ]
+        },
+        "from_run": "bd30c227-956c-4f45-bb66-ec8a930a777a"
+      }
     },
     {
       "file": "weightless-extended.mp3",
@@ -31,7 +371,129 @@
       "slot": 3,
       "title": "it's murph - Weightless (w/ Arlo & Allegra Miles) (Extended)",
       "origin": "Third-party release, supplied by the author as a reference. Not redistributed in the repository.",
-      "comment": "Use this for stereo width, but don't treat its brighter top end as a target."
+      "comment": "Use this for stereo width, but don't treat its brighter top end as a target.",
+      "frozen": {
+        "sha256": "c8ba843278ab54cd234397c77803966c6c400714bad8c7e8278507000047578c",
+        "source": {
+          "bytes": 13556240,
+          "channels": 2,
+          "codec": "mp3",
+          "decode_warnings": [],
+          "duration_s": 322.17825396825396,
+          "format": "mp3",
+          "sample_rate": 44100,
+          "sha256": "c8ba843278ab54cd234397c77803966c6c400714bad8c7e8278507000047578c"
+        },
+        "prep": {
+          "applied_gain_db": -1.3466055980133005,
+          "original_sample_peak_dbfs": 1.3466055980133005,
+          "resampled_from": null,
+          "silent": false
+        },
+        "grid": {
+          "bpm": 130.0,
+          "first_beat_s": 0.0486,
+          "downbeat_s": 0.0486,
+          "downbeat_confidence": "guess",
+          "constant_tempo": true
+        },
+        "map": {
+          "bpm": 130.0,
+          "downbeat_s": 0.0486,
+          "grid_source": "detected",
+          "sections": [
+            {
+              "id": "s1",
+              "label": "intro",
+              "start_s": 0.0,
+              "end_s": 29.587,
+              "start_bar": 1,
+              "end_bar": 17
+            },
+            {
+              "id": "s3",
+              "label": "intro, cont'd",
+              "start_s": 29.587,
+              "end_s": 62.818,
+              "start_bar": 17,
+              "end_bar": 35
+            },
+            {
+              "id": "s4",
+              "label": "verse",
+              "start_s": 62.818,
+              "end_s": 92.356,
+              "start_bar": 35,
+              "end_bar": 51
+            },
+            {
+              "id": "s5",
+              "label": "chorus",
+              "start_s": 92.356,
+              "end_s": 121.895,
+              "start_bar": 51,
+              "end_bar": 67
+            },
+            {
+              "id": "nmw4bhcc8",
+              "label": "drop",
+              "start_s": 121.895,
+              "end_s": 151.433,
+              "start_bar": 67,
+              "end_bar": 83
+            },
+            {
+              "id": "nmw4bhnut",
+              "label": "bridge",
+              "start_s": 151.433,
+              "end_s": 182.818,
+              "start_bar": 83,
+              "end_bar": 100
+            },
+            {
+              "id": "nmw4bhwj8",
+              "label": "verse",
+              "start_s": 182.818,
+              "end_s": 214.202,
+              "start_bar": 100,
+              "end_bar": 117
+            },
+            {
+              "id": "s6",
+              "label": "chorus",
+              "start_s": 214.202,
+              "end_s": 228.972,
+              "start_bar": 117,
+              "end_bar": 125
+            },
+            {
+              "id": "nmw4biavj",
+              "label": "build",
+              "start_s": 228.972,
+              "end_s": 243.741,
+              "start_bar": 125,
+              "end_bar": 133
+            },
+            {
+              "id": "nmw4bin72",
+              "label": "drop",
+              "start_s": 243.741,
+              "end_s": 273.279,
+              "start_bar": 133,
+              "end_bar": 149
+            },
+            {
+              "id": "s7",
+              "label": "outro",
+              "start_s": 273.279,
+              "end_s": 322.178,
+              "start_bar": 149,
+              "end_bar": 176
+            }
+          ]
+        },
+        "from_run": "bd30c227-956c-4f45-bb66-ec8a930a777a"
+      }
     }
   ],
   "spares": [

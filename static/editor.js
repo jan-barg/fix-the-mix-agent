@@ -58,6 +58,7 @@ export class SectionEditor {
     this.bpm = map.bpm;
     this.downbeat = map.downbeat_s;
     this.gridSource = map.grid_source;
+    this.checked = map.origin === "checked"; // a demo map the producer already checked
     this.sections = map.sections.map((s) => ({ ...s }));
     this.accepted = map.accepted || map.confirmed;
     this.dirty = false;
@@ -184,11 +185,11 @@ export class SectionEditor {
     this.root.classList.toggle("accepted", this.accepted);
     const stateBadge = this.$(".state-badge");
     stateBadge.className = `badge state-badge ${this.accepted ? "ok" : ""}`;
-    stateBadge.textContent = this.accepted ? "✓ Accepted" : this.dirty ? "Edited" : "Suggested";
+    stateBadge.textContent = this.accepted ? "✓ Accepted" : this.dirty ? "Edited" : this.checked ? "Checked by the producer" : "Suggested";
     const g = this.track.grid;
     const gridBadge = this.$(".grid-badge");
     const noGrid = this.gridSource === "detected" && g.downbeat_confidence === "none";
-    const checkGrid = this.gridSource === "detected" && (!g.constant_tempo || g.downbeat_confidence !== "likely");
+    const checkGrid = this.gridSource === "detected" && !this.checked && (!g.constant_tempo || g.downbeat_confidence !== "likely");
     gridBadge.className = `badge grid-badge ${checkGrid ? "warn" : ""}`;
     gridBadge.textContent = this.gridSource === "user" ? "Your grid" : noGrid ? "No beat found" : checkGrid ? "Check the grid" : "Grid detected";
     gridBadge.title = noGrid ? "No steady beat was detected, so this is a placeholder 120 BPM grid: set the BPM and nudge the downbeat."
