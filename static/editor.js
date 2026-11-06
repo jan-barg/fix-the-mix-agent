@@ -4,13 +4,23 @@
 
 export const LABELS = ["intro", "build", "drop", "breakdown", "verse", "chorus", "bridge", "outro", "unknown"];
 export const LABEL_COLOURS = {
-  intro: "#5b8def", build: "#f2b134", drop: "#ef4b5f", breakdown: "#3fbf8f", verse: "#8f7cf0",
-  chorus: "#f07cc0", bridge: "#5cc9e6", outro: "#7a86a8", unknown: "#5d6672",
+  intro: "#a9bedb", build: "#e6c27a", drop: "#e2907a", breakdown: "#9fcbb4", verse: "#bdb0dc",
+  chorus: "#e7a9c2", bridge: "#9dcfd9", outro: "#b3b8c4", unknown: "#d2d5da",
 };
-export const TRACK_COLOURS = { user: "#ef5b6b", ref1: "#3fa7d6", ref2: "#4cc27a", ref3: "#a98be0" };
-const CUSTOM_COLOUR = "#b59a6a";
-const BAND_RGB = { low: [46, 112, 255], mid: [255, 160, 44], high: [236, 241, 255] };
-const RULER = 20, STRIP = 32, MIN_LEN = 0.5, MAX_PX_PER_S = 600;
+export const TRACK_COLOURS = { user: "#14161b", ref1: "#2a7891", ref2: "#5d8a2c", ref3: "#7a62a8" };
+const CUSTOM_COLOUR = "#d3bf98";
+// The canvas is a dark display whatever the page around it: a cool haze for the whole signal,
+// the bass as a solid orange core (DESIGN.md §9).
+const SCREEN = {
+  well: "#0e1115", band: "#0a0c0f", line: "rgba(255,255,255,0.06)", pill: "#1c2129",
+  grid: ["rgba(255,255,255,0.03)", "rgba(255,255,255,0.065)", "rgba(255,255,255,0.16)"],
+  tick: ["rgba(255,255,255,0.2)", "rgba(255,255,255,0.8)"], num: ["#7c8592", "#eef1f5"],
+  bound: ["rgba(255,255,255,0.26)", "rgba(255,255,255,0.85)"], handle: "#1c2129", handleLine: ["rgba(255,255,255,0.4)", "#fff"],
+  tint: [0.045, 0.11], haze: "rgba(150,168,196,0.20)", body: "rgba(150,168,196,0.30)", edge: "rgba(226,234,245,0.42)",
+  core: ["#b8441a", "#f2763a"], cursor: "#f2763a", playhead: "#fff",
+  ovHaze: "rgba(160,178,204,0.32)", ovCore: "#f07a3e", ovDim: "rgba(14,17,21,0.72)", ovBox: "#fff",
+};
+const RULER = 26, STRIP = 38, MIN_LEN = 0.5, MAX_PX_PER_S = 600;
 const START_TOLERANCE_S = 0.05;  // grid.py: a downbeat this close before 0 s is bar 1 at the file start
 
 export const labelColour = (label) => LABEL_COLOURS[label] || CUSTOM_COLOUR;
@@ -39,6 +49,40 @@ function decode(b64, Type) {
 function rgba(hex, a) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+// A label colour lifted toward white, so section names stay readable on the dark strip.
+function lift(hex, k = 0.3) {
+  const n = parseInt(hex.slice(1), 16), up = (v) => Math.round(v + (255 - v) * k);
+  return `rgb(${up((n >> 16) & 255)},${up((n >> 8) & 255)},${up(n & 255)})`;
+}
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+// Band shares stacked from the centre out: the bass share is the core, bass plus mids the body.
+const share = (c) => { const s = c.l + c.m * 0.8 + c.h * 0.55 || 1; return [c.l / s, (c.m * 0.8) / s]; };
+// A 1-2-3-2-1 filter, so the outline reads as one shape rather than a row of bars.
+function smooth(v) {
+  const n = v.length, o = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    o[i] = (v[Math.max(0, i - 2)] + 2 * v[Math.max(0, i - 1)] + 3 * v[i] + 2 * v[Math.min(n - 1, i + 1)] + v[Math.min(n - 1, i + 2)]) / 9;
+  }
+  return o;
+}
+// A filled shape mirrored around the centre line, and its top and bottom outline.
+function mirror(ys, mid) {
+  const p = new Path2D(), n = ys.length;
+  p.moveTo(0, mid - ys[0]);
+  for (let i = 1; i < n; i++) p.lineTo(i, mid - ys[i]);
+  for (let i = n - 1; i >= 0; i--) p.lineTo(i, mid + ys[i]);
+  p.closePath();
+  return p;
+}
+function outline(ys, mid) {
+  const p = new Path2D(), n = ys.length;
+  p.moveTo(0, mid - ys[0]);
+  for (let i = 1; i < n; i++) p.lineTo(i, mid - ys[i]);
+  p.moveTo(0, mid + ys[0]);
+  for (let i = 1; i < n; i++) p.lineTo(i, mid + ys[i]);
+  return p;
 }
 
 const icon = {
@@ -74,10 +118,12 @@ export class SectionEditor {
     this.audio = new Audio(`/api/runs/${runId}/tracks/${track.id}/audio`);
     this.audio.preload = "metadata";
     this.stopAt = null;
+    this.fonts = { ui: cssVar("--font") || "system-ui, sans-serif", mono: cssVar("--mono") || "ui-monospace, monospace" };
     this.render();
     this.fit();
     this.bind();
     this.draw();
+    document.fonts?.ready.then(() => this.draw()); // redraw the canvas text once the web fonts arrive
   }
 
   // --- Grid ---
@@ -131,48 +177,44 @@ export class SectionEditor {
         <span class="dot"></span>
         <span class="ed-title">${esc(t.display_name)}</span>
         <span class="ed-file" title="${esc(t.filename)}">${esc(t.filename)}</span>
-        <span class="spacer"></span>
         <span class="badge grid-badge"></span>
         <span class="badge state-badge"></span>
-        <button class="btn accept" type="button">Accept sections</button>
+        <button class="btn sm accept" type="button">Accept sections</button>
       </div>
-      <div class="canvas-wrap">
-        <canvas class="overview"></canvas>
-        <canvas class="main-canvas"></canvas>
-      </div>
+      <div class="canvas-wrap ov-wrap"><canvas class="overview"></canvas></div>
+      <div class="canvas-wrap"><canvas class="main-canvas"></canvas></div>
       <div class="toolbar">
-        <div class="group">
+        <div class="tg"><span class="tg-l">Play</span><div class="group">
           <button class="tb play" data-act="play" title="Play / pause (Space)">${icon.play}<span>Play</span></button>
           <button class="tb" data-act="play-section" title="Play the selected section">Section</button>
-          <button class="tb" data-act="play-boundary" title="Play 4 s either side of the nearest boundary">Boundary ±4 s</button>
-        </div>
-        <div class="group">
+          <button class="tb" data-act="play-boundary" title="Play 4 s either side of the nearest boundary">Boundary <span class="mono">±4 s</span></button>
+        </div></div>
+        <div class="tg"><span class="tg-l">Edit</span><div class="group">
           <button class="tb" data-act="split" title="Split at the cursor (S)">Split</button>
           <button class="tb" data-act="merge" title="Merge with the next section (M)">Merge →</button>
-          <label class="group-label" for="lbl-${id}">Label</label>
-          <select id="lbl-${id}" data-act="label">${options}</select>
-        </div>
-        <div class="group snap">
-          <span class="group-label">Snap</span>
+          <span class="tb-sep"></span>
+          <label class="sr" for="lbl-${id}">Label</label>
+          <select id="lbl-${id}" data-act="label" title="Label of the selected section">${options}</select>
+        </div></div>
+        <div class="tg"><span class="tg-l">Snap</span><div class="group">
           <button class="tb" data-snap="bar">Bar</button>
           <button class="tb" data-snap="beat">Beat</button>
           <button class="tb" data-snap="off">Off</button>
-        </div>
-        <div class="group">
-          <button class="tb" data-act="zoom-out" title="Zoom out (−)">−</button>
+        </div></div>
+        <div class="tg"><span class="tg-l">Zoom</span><div class="group">
+          <button class="tb mono" data-act="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
           <button class="tb" data-act="fit" title="Whole track">Fit</button>
-          <button class="tb" data-act="zoom-in" title="Zoom in (+)">+</button>
-        </div>
-        <div class="group">
-          <label class="group-label" for="bpm-${id}">BPM</label>
+          <button class="tb mono" data-act="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+        </div></div>
+        <div class="tg"><label class="tg-l" for="bpm-${id}">BPM · downbeat</label><div class="group">
           <input id="bpm-${id}" type="number" step="0.01" min="60" max="200" data-act="bpm">
-          <span class="group-label">Downbeat</span>
-          <button class="tb" data-nudge="-beat" title="Move the downbeat one beat earlier">−1 beat</button>
-          <button class="tb" data-nudge="-0.01" title="10 ms earlier">−10 ms</button>
-          <button class="tb" data-nudge="0.01" title="10 ms later">+10 ms</button>
-          <button class="tb" data-nudge="beat" title="Move the downbeat one beat later">+1 beat</button>
-        </div>
-        <span class="readout"></span>
+          <span class="tb-sep"></span>
+          <button class="tb mono" data-nudge="-beat" title="Move the downbeat one beat earlier">−1 beat</button>
+          <button class="tb mono" data-nudge="-0.01" title="10 ms earlier">−10 ms</button>
+          <button class="tb mono" data-nudge="0.01" title="10 ms later">+10 ms</button>
+          <button class="tb mono" data-nudge="beat" title="Move the downbeat one beat later">+1 beat</button>
+        </div></div>
+        <div class="tg tg-readout"><span class="tg-l">Position</span><output class="readout"></output></div>
       </div>`;
     this.$ = (sel) => this.root.querySelector(sel);
     this.overview = this.$(".overview");
@@ -490,21 +532,21 @@ export class SectionEditor {
     return { amp: Math.max(hi, -lo) / 127, l: l / 255, m: m / 255, h: h / 255 };
   }
 
-  drawWave(ctx, x0, w, top, height, t0, pxPerS) {
-    // Three stacked layers, Rekordbox-style: low (blue) at full amplitude, then mid (orange) and high
-    // (white) scaled by their share, so bass-heavy passages read blue and bright ones turn white.
-    const mid = top + height / 2, half = height / 2 - 2;
-    const cols = [];
-    for (let x = 0; x < w; x++) cols.push(this.column(t0 + x / pxPerS, t0 + (x + 1) / pxPerS));
-    const layers = [[BAND_RGB.low, 1.0, "l"], [BAND_RGB.mid, 0.72, "m"], [BAND_RGB.high, 0.42, "h"]];
-    for (const [rgb, scale, key] of layers) {
-      ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-      for (let x = 0; x < w; x++) {
-        const c = cols[x], peak = Math.max(c.l, c.m, c.h) || 1;
-        const hgt = key === "l" ? c.amp * half : c.amp * half * scale * (c[key] / peak);
-        if (hgt > 0.3) ctx.fillRect(x0 + x, mid - hgt, 1, hgt * 2);
-      }
+  drawWave(ctx, w, mid, amp, t0, pxPerS) {
+    // Three smoothed layers from the centre out: the whole signal as a cool haze, bass plus mids as a
+    // denser body, and the bass share as a solid orange core, so kicks and bass lines read at a glance.
+    const n = Math.ceil(w) + 1, outer = new Float32Array(n), body = new Float32Array(n), core = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const c = this.column(t0 + i / pxPerS, t0 + (i + 1) / pxPerS), a = c.amp * amp, [sl, sm] = share(c);
+      outer[i] = a; body[i] = a * (sl + sm); core[i] = a * sl;
     }
+    const o = smooth(outer);
+    ctx.fillStyle = SCREEN.haze; ctx.fill(mirror(o, mid));
+    ctx.fillStyle = SCREEN.body; ctx.fill(mirror(smooth(body), mid));
+    const g = ctx.createLinearGradient(0, mid - amp * 0.7, 0, mid + amp * 0.7);
+    g.addColorStop(0, SCREEN.core[0]); g.addColorStop(0.5, SCREEN.core[1]); g.addColorStop(1, SCREEN.core[0]);
+    ctx.fillStyle = g; ctx.fill(mirror(smooth(core), mid));
+    ctx.strokeStyle = SCREEN.edge; ctx.lineWidth = 1; ctx.stroke(outline(o, mid));
   }
 
   draw() {
@@ -515,22 +557,29 @@ export class SectionEditor {
 
   drawMain() {
     const { ctx, w, h } = this.setup(this.mainCanvas);
-    const waveTop = RULER, waveH = h - RULER - STRIP, stripTop = h - STRIP;
+    const waveTop = RULER, stripTop = h - STRIP, waveH = stripTop - waveTop, mid = waveTop + waveH / 2;
     const tEnd = this.xToT(w);
+    ctx.fillStyle = SCREEN.well;
+    ctx.fillRect(0, 0, w, h);
 
     // Section tints behind the waveform.
     this.sections.forEach((s, i) => {
       const x0 = this.tToX(s.start_s), x1 = this.tToX(s.end_s);
       if (x1 < 0 || x0 > w) return;
-      ctx.fillStyle = rgba(labelColour(s.label), i === this.selected ? 0.13 : 0.06);
+      ctx.fillStyle = rgba(labelColour(s.label), SCREEN.tint[i === this.selected ? 1 : 0]);
       ctx.fillRect(x0, waveTop, x1 - x0, waveH);
     });
 
-    // Grid: beats when there is room, bars, 8-bar phrases; bar numbers on the ruler.
+    // Ruler band.
+    ctx.fillStyle = SCREEN.band;
+    ctx.fillRect(0, 0, w, RULER);
+    ctx.fillStyle = SCREEN.line;
+    ctx.fillRect(0, RULER - 1, w, 1);
+
+    // Grid: beats when there is room, bars, 8-bar phrases; bar ticks and numbers on the ruler, phrase numbers in a pill.
     const pxPerBeat = this.beat * this.pxPerS, pxPerBar = 4 * pxPerBeat;
     const labelEvery = [1, 2, 4, 8, 16, 32, 64].find((n) => n * pxPerBar >= 46) || 64;
     const firstBeat = Math.floor((this.viewStart - this.downbeat) / this.beat);
-    ctx.font = "10.5px Inter, system-ui, sans-serif";
     ctx.textBaseline = "middle";
     for (let k = firstBeat; ; k++) {
       const t = this.downbeat + k * this.beat;
@@ -541,57 +590,77 @@ export class SectionEditor {
       if (!isBar && pxPerBeat < 7) continue;
       if (isBar && pxPerBar < 3 && (bar - 1) % 8 !== 0) continue;
       const phrase = isBar && (bar - 1) % 8 === 0;
-      ctx.strokeStyle = phrase ? "rgba(255,255,255,0.22)" : isBar ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.045)";
+      ctx.strokeStyle = SCREEN.grid[phrase ? 2 : isBar ? 1 : 0];
       ctx.beginPath(); ctx.moveTo(x, waveTop); ctx.lineTo(x, stripTop); ctx.stroke();
-      if (isBar && (bar - 1) % labelEvery === 0) {
-        ctx.fillStyle = phrase ? "#c9ced6" : "#7d8692";
-        ctx.fillText(String(bar), x + 4, RULER / 2);
-        ctx.fillStyle = "rgba(255,255,255,0.25)";
-        ctx.fillRect(x - 0.5, 4, 1, RULER - 8);
+      if (!isBar) continue;
+      ctx.fillStyle = SCREEN.tick[phrase ? 1 : 0];
+      ctx.fillRect(x - 0.5, phrase ? RULER - 11 : RULER - 6, 1, phrase ? 10 : 5);
+      if ((bar - 1) % labelEvery === 0) {
+        const text = String(bar);
+        ctx.font = `${phrase ? 500 : 400} 10.5px ${this.fonts.mono}`;
+        if (phrase) {
+          ctx.fillStyle = SCREEN.pill;
+          ctx.beginPath(); ctx.roundRect(x + 3, 3, ctx.measureText(text).width + 10, 15, 5); ctx.fill();
+        }
+        ctx.fillStyle = SCREEN.num[phrase ? 1 : 0];
+        ctx.fillText(text, x + 8, 11);
       }
     }
 
-    this.drawWave(ctx, 0, w, waveTop, waveH, this.viewStart, this.pxPerS);
+    this.drawWave(ctx, w, mid, (waveH / 2 - 10) * 0.94, this.viewStart, this.pxPerS);
 
-    // Section strip.
-    ctx.font = "600 11.5px Inter, system-ui, sans-serif";
+    // Section strip: the selected section filled in its colour, the others as tinted pills with coloured names.
+    ctx.fillStyle = SCREEN.band;
+    ctx.fillRect(0, stripTop, w, STRIP);
+    ctx.fillStyle = SCREEN.line;
+    ctx.fillRect(0, stripTop, w, 1);
+    ctx.font = `600 12px ${this.fonts.ui}`;
     this.sections.forEach((s, i) => {
       const x0 = Math.max(0, this.tToX(s.start_s)), x1 = Math.min(w, this.tToX(s.end_s));
       if (x1 <= 0 || x0 >= w) return;
       const col = labelColour(s.label), sel = i === this.selected;
-      ctx.fillStyle = rgba(col, sel ? 0.95 : 0.72);
-      ctx.fillRect(x0 + 1, stripTop + 4, Math.max(0, x1 - x0 - 2), STRIP - 8);
-      if (sel) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.strokeRect(x0 + 1.75, stripTop + 4.75, Math.max(0, x1 - x0 - 3.5), STRIP - 9.5); ctx.lineWidth = 1; }
+      ctx.fillStyle = rgba(col, sel ? 0.92 : 0.16);
+      ctx.beginPath(); ctx.roundRect(x0 + 2, stripTop + 7, Math.max(0, x1 - x0 - 4), STRIP - 14, 8); ctx.fill();
       const guess = s.label_confidence === "guess" ? "?" : "";
-      const [b0, b1] = this.barSpan(s), bars = b1 - b0;
-      const text = x1 - x0 > 120 ? `${s.label}${guess} · ${bars} bars` : x1 - x0 > 40 ? `${s.label}${guess}` : "";
+      const [b0, b1] = this.barSpan(s), room = x1 - x0 - 26;
+      const full = `${s.label}${guess} · ${b1 - b0} bars`, short = `${s.label}${guess}`;
+      const text = ctx.measureText(full).width <= room ? full : ctx.measureText(short).width <= room ? short : "";
       if (text) {
         ctx.save();
-        ctx.beginPath(); ctx.rect(x0 + 4, stripTop, x1 - x0 - 8, STRIP); ctx.clip();
-        ctx.fillStyle = "#0b0d10";
-        ctx.fillText(text, x0 + 9, stripTop + STRIP / 2);
+        ctx.beginPath(); ctx.rect(x0 + 6, stripTop, x1 - x0 - 12, STRIP); ctx.clip();
+        ctx.fillStyle = sel ? "#14161b" : lift(col);
+        ctx.fillText(text, x0 + 13, stripTop + STRIP / 2 + 0.5);
         ctx.restore();
       }
     });
 
-    // Boundaries with grab handles.
+    // Boundaries, with a grab handle where each meets the strip; the selected section's edges are brighter.
     for (let i = 1; i < this.sections.length; i++) {
       const x = Math.round(this.tToX(this.sections[i].start_s)) + 0.5;
-      if (x < -2 || x > w + 2) continue;
-      ctx.strokeStyle = "rgba(255,255,255,0.75)";
-      ctx.beginPath(); ctx.moveTo(x, RULER); ctx.lineTo(x, h); ctx.stroke();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath(); ctx.moveTo(x - 5, RULER); ctx.lineTo(x + 5, RULER); ctx.lineTo(x, RULER + 6); ctx.closePath(); ctx.fill();
+      if (x < -6 || x > w + 6) continue;
+      const hot = i === this.selected || i - 1 === this.selected;
+      ctx.strokeStyle = SCREEN.bound[hot ? 1 : 0];
+      ctx.lineWidth = hot ? 1.5 : 1;
+      ctx.beginPath(); ctx.moveTo(x, RULER); ctx.lineTo(x, h - 6); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.fillStyle = SCREEN.handle;
+      ctx.strokeStyle = SCREEN.handleLine[hot ? 1 : 0];
+      ctx.beginPath(); ctx.roundRect(x - 4.5, stripTop - 12, 9, 24, 4.5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = SCREEN.handleLine[hot ? 1 : 0];
+      ctx.fillRect(x - 1.5, stripTop - 5, 1, 10);
+      ctx.fillRect(x + 0.5, stripTop - 5, 1, 10);
     }
 
     // Edit cursor and playhead.
     const cx = Math.round(this.tToX(this.cursor)) + 0.5;
-    ctx.setLineDash([3, 3]); ctx.strokeStyle = "rgba(255,255,255,0.6)";
+    ctx.setLineDash([3, 3]); ctx.strokeStyle = SCREEN.cursor;
     ctx.beginPath(); ctx.moveTo(cx, RULER); ctx.lineTo(cx, stripTop); ctx.stroke();
     ctx.setLineDash([]);
+    ctx.fillStyle = SCREEN.cursor;
+    ctx.beginPath(); ctx.moveTo(cx - 5, RULER); ctx.lineTo(cx + 5, RULER); ctx.lineTo(cx, RULER + 6); ctx.closePath(); ctx.fill();
     if (!this.audio.paused) {
       const px = Math.round(this.tToX(this.audio.currentTime)) + 0.5;
-      ctx.strokeStyle = "#ff5a6a"; ctx.lineWidth = 2;
+      ctx.strokeStyle = SCREEN.playhead; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, h); ctx.stroke();
       ctx.lineWidth = 1;
     }
@@ -599,20 +668,33 @@ export class SectionEditor {
 
   drawOverview() {
     const { ctx, w, h } = this.setup(this.overview);
-    const pxPerS = w / this.duration;
-    this.drawWave(ctx, 0, w, 0, h - 6, 0, pxPerS);
+    const pxPerS = w / this.duration, mid = (h - 6) / 2, half = mid - 4;
+    ctx.fillStyle = SCREEN.well;
+    ctx.fillRect(0, 0, w, h);
+    const haze = new Path2D(), core = new Path2D();
+    for (let x = 0; x < w; x++) {
+      const c = this.column(x / pxPerS, (x + 1) / pxPerS), a = c.amp * half, k = a * share(c)[0];
+      haze.rect(x, mid - a, 1, a * 2);
+      core.rect(x, mid - k, 1, k * 2);
+    }
+    ctx.fillStyle = SCREEN.ovHaze; ctx.fill(haze);
+    ctx.fillStyle = SCREEN.ovCore; ctx.fill(core);
     this.sections.forEach((s) => {
       ctx.fillStyle = labelColour(s.label);
-      ctx.fillRect(s.start_s * pxPerS + 0.5, h - 5, Math.max(1, (s.end_s - s.start_s) * pxPerS - 1), 5);
+      ctx.fillRect(s.start_s * pxPerS + 1, h - 6, Math.max(1, (s.end_s - s.start_s) * pxPerS - 2), 4);
     });
+    // The part in view: the rest dimmed, a rounded box around it (none when the whole track fits).
     const vx = this.viewStart * pxPerS, vw = (this.width / this.pxPerS) * pxPerS;
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.fillRect(0, 0, vx, h);
-    ctx.fillRect(vx + vw, 0, w - vx - vw, h);
-    ctx.strokeStyle = "rgba(255,255,255,0.8)";
-    ctx.strokeRect(vx + 0.5, 0.5, Math.max(2, vw - 1), h - 1);
+    if (vw < w - 2) {
+      ctx.fillStyle = SCREEN.ovDim;
+      ctx.fillRect(0, 0, vx, h);
+      ctx.fillRect(vx + vw, 0, w - vx - vw, h);
+      ctx.strokeStyle = SCREEN.ovBox; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.roundRect(vx + 0.75, 0.75, Math.max(4, vw - 1.5), h - 1.5, 7); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
     const t = this.audio.paused ? this.cursor : this.audio.currentTime;
-    ctx.fillStyle = this.audio.paused ? "rgba(255,255,255,0.7)" : "#ff5a6a";
-    ctx.fillRect(t * pxPerS, 0, 1.5, h);
+    ctx.fillStyle = this.audio.paused ? SCREEN.cursor : SCREEN.playhead;
+    ctx.fillRect(Math.round(t * pxPerS) - 0.75, 0, 1.5, h);
   }
 }

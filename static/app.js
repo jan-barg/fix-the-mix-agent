@@ -93,20 +93,23 @@ async function sendChat(message) {
 
 // --- Upload view ---
 function renderCards() {
-  $("#cards").innerHTML = SLOTS.map((s) => `
+  $("#cards").innerHTML = SLOTS.map((s, i) => `
     <article class="card" data-slot="${s.id}" style="--c:${TRACK_COLOURS[s.id]}">
       <div class="card-head">
-        <span class="dot"></span><span class="card-title">${s.title}</span>
+        <span class="card-n">0${i + 1}</span><span class="dot"></span><span class="card-title">${s.title}</span>
         <span class="tag ${s.required ? "req" : ""}">${s.required ? "Required" : "Optional"}</span>
       </div>
       <label class="drop">
-        <span class="drop-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+        <span class="drop-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
         <span class="drop-text"><span class="drop-main">Drop audio or choose a file</span><span class="drop-sub">${s.hint}</span></span>
-        <button class="remove" type="button" title="Remove" hidden>✕</button>
+        <button class="remove" type="button" title="Remove" aria-label="Remove ${s.title}" hidden><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
         <input type="file" accept=".wav,.mp3,audio/wav,audio/mpeg" />
       </label>
       <div class="status"></div>
-      <textarea rows="2" placeholder="${s.placeholder}"></textarea>
+      <div class="field">
+        <label class="field-label" for="note-${s.id}">Note <span class="field-hint">${s.id === "user" ? "What should the Lead know?" : "What is this reference for?"}</span></label>
+        <textarea id="note-${s.id}" rows="2" placeholder="${s.placeholder}"></textarea>
+      </div>
     </article>`).join("");
 
   for (const card of document.querySelectorAll(".card")) {
@@ -291,38 +294,47 @@ function lastReply(run) {
   return [...(run.transcript || [])].reverse().find((m) => m.role === "assistant")?.text || "";
 }
 
+const CHECK = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>';
+
 function renderLead() {
   const run = state.run, badge = $("#brief-badge");
   const asking = run.state === "NeedsClarification";
-  badge.className = `badge ${state.leadBusy ? "" : run.brief ? "ok" : asking ? "warn" : ""}`;
-  badge.textContent = state.leadBusy ? "Reading your notes…" : run.brief ? "Brief recorded" : asking ? "Needs your answer" : "No brief yet";
+  badge.className = `badge ${state.leadBusy ? "live" : run.brief ? "ok" : asking ? "warn" : ""}`;
+  badge.innerHTML = state.leadBusy ? '<span class="pulse"></span>Reading your notes'
+    : run.brief ? `${CHECK}Brief recorded` : asking ? "Needs your answer" : "No brief yet";
+  // While the Lead reads, a few skeleton lines stand in for its reply.
   $("#lead-msg").innerHTML = state.leadBusy
-    ? '<p class="thinking"><span class="spinner"></span>Reading your comments and the tracks…</p>'
+    ? `<div class="skel" role="status" aria-label="Reading your comments and the tracks">${[34, 92, 84, 88, 58].map((w) => `<i style="width:${w}%"></i>`).join("")}</div>`
     : md(lastReply(run)) || '<p class="muted">The Lead turns your comments into a brief for the analysis.</p>';
-  $("#brief").innerHTML = run.brief ? renderBrief(run) : "";
+  $("#brief").innerHTML = run.brief ? renderBrief(run) : '<p class="brief-empty">The brief appears here once the Lead has read your notes.</p>';
   $("#lead-form").hidden = state.leadBusy;
   $("#lead-input").placeholder = asking ? "Your answer…" : "Tell the Lead what to change in the brief (optional)…";
 }
 
 function renderBrief(run) {
   const b = run.brief, name = (id) => run.tracks.find((t) => t.id === id)?.display_name || id;
+  const list = (items) => `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+  const row = (k, v, colour) => `<div><dt>${colour ? `<span class="dot" style="--c:${colour}"></span>` : ""}${esc(k)}</dt><dd>${v}</dd></div>`;
+  const stage = b.production_stage ? b.production_stage[0].toUpperCase() + b.production_stage.slice(1) : "";
   const rows = [
-    ["Goals", b.goals.join("; ")],
-    ["Keep", b.preserve.join("; ")],
-    ...b.reference_roles.map((r) => [name(r.track_id), (r.aspects.join(", ") || "general comparison")
-      + (r.exclusions.length ? ` · not: ${r.exclusions.join(", ")}` : "")]),
-    ["Stage", b.production_stage],
-  ].filter(([, v]) => v);
-  return `<dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`;
+    b.goals.length && row("Goals", list(b.goals)),
+    b.preserve.length && row("Keep", list(b.preserve)),
+    ...b.reference_roles.map((r) => row(name(r.track_id).replace(/^Reference\b/, "Ref"),
+      esc(r.aspects.join(", ") || "general comparison")
+        + (r.exclusions.length ? `<span class="not">not: ${esc(r.exclusions.join(", "))}</span>` : ""),
+      TRACK_COLOURS[r.track_id])),
+    stage && row("Stage", esc(stage)),
+  ].filter(Boolean);
+  return `<dl>${rows.join("")}</dl>`;
 }
 
 function updateConfirm() {
   const accepted = state.editors.filter((e) => e.accepted).length;
   const ready = state.run?.brief && !state.leadBusy;
   $("#confirm").disabled = !ready;
-  $("#confirm-status").textContent = state.leadBusy ? "Waiting for the Lead to read your notes…"
+  $("#confirm-status").innerHTML = state.leadBusy ? "Waiting for the Lead to read your notes…"
     : !state.run?.brief ? "Answer the Lead above to continue."
-    : `${accepted} of ${state.editors.length} accepted · confirming accepts the rest as they are`;
+    : `<b>${accepted} of ${state.editors.length}</b> accepted · confirming accepts the rest as they are`;
 }
 
 async function confirmAll() {
@@ -379,12 +391,14 @@ async function pollOnce() {
   p.events.forEach((e, i) => { state.events[p.from + i] = e; });
   state.next = p.next;
   $("#stage").textContent = p.stage;
-  $("#stage-meta").textContent = `${p.rounds_used ? `round ${p.rounds_used} · ` : ""}${p.usage.calls} model calls · $${p.usage.cost_usd.toFixed(2)}`;
-  $("#stage-pulse").classList.toggle("idle", !p.busy);
+  $("#stage-meta").textContent = `${p.rounds_used ? `Round ${p.rounds_used} · ` : ""}${p.usage.calls} model calls · $${p.usage.cost_usd.toFixed(2)}`;
   funFor(p.busy ? state.events.filter((e) => e?.status === "running") : []);
   // This view shows the current request: from the Lead's first turn of the latest message.
   const first = state.events.findLastIndex((e) => e?.agent === "lead" && e.kind === "model_call" && e.args?.turn === 1);
-  renderTrace($("#trace"), state.events.slice(Math.max(first, 0)));
+  const current = state.events.slice(Math.max(first, 0)).filter(Boolean);
+  renderTrace($("#trace"), current);
+  state.dial = dialState(current, p.busy);
+  runDial();
   return p;
 }
 
@@ -404,11 +418,108 @@ function funFor(running) {
 }
 
 const SPECIALISTS = { kick: "Kick", low_end: "Low end", tonal_loudness: "Tone & loudness", stereo: "Stereo" };
-const SPECIALIST_COLOURS = { kick: "#ff8a5b", low_end: "#3fa7d6", tonal_loudness: "#4cc27a", stereo: "#a98be0" };
+// One slate ramp, so the trace and the dial read as one system; an error is the only red.
+const SPECIALIST_COLOURS = { kick: "#334a66", low_end: "#56708f", tonal_loudness: "#7d93ad", stereo: "#a3b4c8" };
+
+// --- The dial: one ring per researcher, showing its latest call (a full turn is 60 s) ---
+const RINGS = [["kick", 166], ["low_end", 144], ["tonal_loudness", 122], ["stereo", 100]];
+const TURN_S = 60;
+const polar = (r, a) => [220 + r * Math.sin(a), 220 - r * Math.cos(a)];
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+function arcPath(r, frac) {
+  const f = Math.min(0.9999, Math.max(0.0001, frac)), [x, y] = polar(r, f * Math.PI * 2);
+  return `M220 ${220 - r}A${r} ${r} 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}`;
+}
+
+function buildDial() {
+  if ($("#dial svg")) return;
+  let s = '<svg class="dial" viewBox="0 0 440 440" role="img" aria-label="Time each researcher has spent on its latest call">';
+  for (let i = 0; i < 60; i++) {
+    const a = (i * Math.PI) / 30, long = i % 5 === 0, [x1, y1] = polar(long ? 192 : 197, a), [x2, y2] = polar(204, a);
+    s += `<line class="tick ${long ? "l" : ""}" x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;
+  }
+  for (const sec of [15, 30, 45]) {
+    const [x, y] = polar(180, (sec * Math.PI) / 30);
+    s += `<text class="rlab" x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" text-anchor="middle">${sec}s</text>`;
+  }
+  s += '<g class="sweep"><circle cx="220" cy="16" r="3.2"/></g>';
+  s += [0, -2.4, -4.8].map((d) => `<circle class="rp" cx="220" cy="220" r="62" style="animation-delay:${d}s"/>`).join("");
+  for (const [k, r] of RINGS) {
+    s += `<circle class="ring" cx="220" cy="220" r="${r}"/><path class="arc" data-k="${k}"/>`;
+    s += `<g class="head" data-k="${k}"><circle class="halo" cx="220" cy="${220 - r}" r="9"/><circle class="knob" cx="220" cy="${220 - r}" r="4.5"/></g>`;
+    s += `<text class="rlab" x="212" y="${220 - r + 3}" text-anchor="end">${SPECIALISTS[k].replace(" & loudness", "")}</text>`;
+  }
+  s += '<text class="clock" x="220" y="226" text-anchor="middle">0:00</text><text class="clock-l" x="220" y="250" text-anchor="middle">LEAD</text></svg>';
+  $("#dial").innerHTML = s;
+}
+
+// Each specialist's latest researcher call in this request, the latest round, and the request's span.
+function dialState(events, busy) {
+  const calls = {};
+  for (const e of events) if (e.name?.startsWith("researcher:")) calls[e.name.split(":")[1]] = e;
+  const starts = events.map((e) => Date.parse(e.started_at));
+  const ends = events.map((e) => (e.ended_at ? Date.parse(e.ended_at) : Date.now()));
+  return {
+    calls, busy, round: Math.max(0, ...Object.values(calls).map((e) => e.round || 0)),
+    t0: starts.length ? Math.min(...starts) : null, t1: busy || !ends.length ? null : Math.max(...ends),
+  };
+}
+
+function callTiming(e, d, now) {
+  const running = e.status === "running" && d.busy;
+  const end = e.ended_at ? Date.parse(e.ended_at) : running ? now : d.t1 ?? now;
+  return { running, secs: Math.max(0, (end - Date.parse(e.started_at)) / 1000) };
+}
+
+function updateDial() {
+  const d = state.dial, svg = $("#dial svg");
+  if (!d || !svg) return;
+  const now = Date.now();
+  svg.classList.toggle("idle", !d.busy);
+  for (const [k, r] of RINGS) {
+    const e = d.calls[k], arc = svg.querySelector(`.arc[data-k="${k}"]`), head = svg.querySelector(`.head[data-k="${k}"]`);
+    if (!e) { arc.removeAttribute("d"); head.style.display = "none"; continue; }
+    const { running, secs } = callTiming(e, d, now), frac = Math.min(1, secs / TURN_S);
+    const colour = e.status === "error" ? "var(--err)" : SPECIALIST_COLOURS[k];
+    arc.setAttribute("d", arcPath(r, frac));
+    arc.style.setProperty("--c", colour);
+    head.style.display = "";
+    head.style.setProperty("--c", colour);
+    head.classList.toggle("live", running);
+    head.setAttribute("transform", `rotate(${(frac * 360).toFixed(2)} 220 220)`);
+  }
+  svg.querySelector(".clock").textContent = clock(d.t0 ? Math.max(0, ((d.t1 ?? now) - d.t0) / 1000) : 0);
+  svg.querySelector(".clock-l").textContent = d.round ? `ROUND ${d.round}` : "LEAD";
+  // The legend only changes when a shown time does, so write it at most every tenth of a second.
+  const rows = RINGS.map(([k]) => {
+    const e = d.calls[k];
+    if (!e) return { k, cls: "off", t: "–", note: "Not run yet" };
+    const { running, secs } = callTiming(e, d, now);
+    const how = e.status === "error" ? "stopped with an error" : running ? "working" : e.status === "running" ? "stopped" : "done";
+    return { k, cls: e.status === "error" ? "err" : running ? "live" : "", t: `${secs.toFixed(1)} s`, note: `Round ${e.round || 1} · ${how}` };
+  });
+  const key = JSON.stringify(rows);
+  if (key === updateDial.key) return;
+  updateDial.key = key;
+  $("#dial-legend").innerHTML = rows.map(({ k, cls, t, note }) => `<li class="${cls}" style="--c:${SPECIALIST_COLOURS[k]}">
+    <span class="k"></span><b>${SPECIALISTS[k]}</b><span class="t">${t}</span><span class="s">${note}</span></li>`).join("");
+}
+
+// Between polls, keep the running arcs and the clock moving.
+let dialFrame = 0;
+function runDial() {
+  buildDial();
+  cancelAnimationFrame(dialFrame);
+  const step = () => {
+    updateDial();
+    if (state.dial?.busy && !$("#view-analysis").hidden) dialFrame = requestAnimationFrame(step);
+  };
+  step();
+}
 
 function traceLabel(e) {
   if (e.kind === "model_call" && e.agent === "lead") {
-    return { text: `Lead · ${e.args?.phase?.replace("_", "-") ?? ""} turn ${e.args?.turn ?? ""}`, colour: "var(--accent)" };
+    return { text: `Lead · ${e.args?.phase?.replace("_", "-") ?? ""} turn ${e.args?.turn ?? ""}`, colour: "var(--text)" };
   }
   if (e.name.startsWith("researcher:")) {
     const k = e.name.split(":")[1];
@@ -416,11 +527,13 @@ function traceLabel(e) {
   }
   if (e.name === "run_researcher") {
     const k = e.args?.specialist;
-    return { text: `run_researcher · ${SPECIALISTS[k] || k}`, colour: `color-mix(in srgb, ${SPECIALIST_COLOURS[k] || "#888"} 45%, #2a3039)` };
+    return { text: `run_researcher · ${SPECIALISTS[k] || k}`, colour: `color-mix(in srgb, ${SPECIALIST_COLOURS[k] || "#8a9099"} 38%, transparent)` };
   }
-  if (e.kind === "helper") return { text: e.name + (e.cached ? " (cached)" : ""), colour: "#59626e" };
-  return { text: e.name, colour: "#c9a96a" };
+  if (e.kind === "helper") return { text: e.name + (e.cached ? " (cached)" : ""), colour: "#cdd2d9" };
+  return { text: e.name, colour: "var(--faint)" };
 }
+
+const CHEVRON = '<svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5l4.5 4.5L6 12.5"/></svg>';
 
 // Events in tree order: each event followed by what it started (a researcher call by its
 // measurements and its model call), roots in the order they started.
@@ -439,25 +552,32 @@ function renderTrace(el, events) {
   const t = (s) => Date.parse(s), now = Date.now();
   const t0 = Math.min(...list.map((e) => t(e.started_at)));
   const t1 = Math.max(t0 + 1000, ...list.map((e) => (e.ended_at ? t(e.ended_at) : now)));
-  el.innerHTML = list.map((e) => {
-    const { text, colour } = traceLabel(e);
-    const start = t(e.started_at), end = e.ended_at ? t(e.ended_at) : now;
-    const left = ((start - t0) / (t1 - t0)) * 100, width = Math.max(((end - start) / (t1 - t0)) * 100, 0.5);
-    const secs = ((end - start) / 1000).toFixed(1);
-    const args = typeof e.args === "string" ? e.args : JSON.stringify(e.args, null, 1);
-    return `<details class="tr ${e.kind} ${e.status}" data-id="${e.task_id}" ${state.openRows.has(e.task_id) ? "open" : ""}>
+  // A time axis with about six ticks across the request.
+  const span = (t1 - t0) / 1000, step = [1, 2, 5, 10, 15, 20, 30, 60, 120, 300].find((s) => span / s <= 6) || 600;
+  const ticks = [];
+  for (let s = 0; s <= span; s += step) ticks.push(`<span style="left:${(s / span) * 100}%">${s}${s ? "" : " s"}</span>`);
+  el.innerHTML = `<div class="tr-axis" aria-hidden="true"><span>Task</span><span class="ax">${ticks.join("")}</span><span class="r">Duration</span></div>`
+    + list.map((e) => {
+      const { text, colour } = traceLabel(e), d = depth[e.task_id];
+      const start = t(e.started_at), end = e.ended_at ? t(e.ended_at) : now;
+      const left = ((start - t0) / (t1 - t0)) * 100, width = ((end - start) / (t1 - t0)) * 100;
+      const secs = (end - start) / 1000, running = e.status === "running";
+      const c = e.status === "error" ? "var(--err)" : e.status === "interrupted" ? "var(--warn)" : colour;
+      const time = running ? `<span class="live"></span>${secs.toFixed(1)} s` : secs < 0.05 ? "&lt;0.1 s" : `${secs.toFixed(1)} s`;
+      const args = typeof e.args === "string" ? e.args : JSON.stringify(e.args, null, 1);
+      return `<details class="tr ${e.kind} ${e.status}" data-id="${esc(e.task_id)}" style="--d:${d}" ${state.openRows.has(e.task_id) ? "open" : ""}>
       <summary>
-        <span class="tr-label" style="padding-left:${depth[e.task_id] * 14}px">${e.round ? `<b class="tr-round">R${e.round}</b>` : ""}${esc(text)}</span>
-        <span class="tr-lane"><span class="tr-bar" style="left:${left}%;width:${width}%;--c:${colour}"></span></span>
-        <span class="tr-time mono">${e.status === "running" ? "…" : `${secs}s`}</span>
+        <span class="tr-l">${d ? '<span class="elbow"></span>' : ""}${CHEVRON}${e.round ? `<b class="rd">R${e.round}</b>` : ""}<span class="nm">${esc(text)}</span>${e.status === "error" ? '<span class="badge err">error</span>' : ""}</span>
+        <span class="tr-lane"><span class="tr-bar ${running ? "run" : ""} ${width < 0.9 ? "dot" : ""}" style="left:${left}%;width:${Math.max(width, 0.5)}%;--c:${c}"></span></span>
+        <span class="tr-time">${time}</span>
       </summary>
       <div class="tr-body">
-        <div class="tr-k">${esc(e.kind)} · ${esc(e.agent)} · ${esc(e.task_id)}${e.parent_task_id ? ` ← ${esc(e.parent_task_id)}` : ""}${e.cost_usd ? ` · $${e.cost_usd.toFixed(3)}` : ""}</div>
-        <div class="tr-k">Arguments</div><pre>${esc(args)}</pre>
-        <div class="tr-k">Result</div><pre>${esc(e.result || "")}</pre>
+        <div class="tr-meta">${esc(e.kind)} · ${esc(e.agent)} · ${esc(e.task_id)}${e.parent_task_id ? ` ← ${esc(e.parent_task_id)}` : ""}${e.cost_usd ? ` · $${e.cost_usd.toFixed(3)}` : ""}</div>
+        <div><span class="tr-k">Arguments</span><pre>${esc(args)}</pre></div>
+        <div><span class="tr-k">Result</span><pre class="res">${esc(e.result || (running ? "Running…" : ""))}</pre></div>
       </div>
     </details>`;
-  }).join("");
+    }).join("");
   el.querySelectorAll("details").forEach((d) => d.addEventListener("toggle", () => {
     if (d.open) state.openRows.add(d.dataset.id); else state.openRows.delete(d.dataset.id);
   }));
@@ -499,7 +619,7 @@ function findingHtml(f) {
   if (f.kind === "interpretation") {
     return `<p><span class="k">Possible cause</span> ${esc(f.text)}</p>${f.alternatives.length ? `<p class="muted small">Or: ${esc(f.alternatives.join("; "))}</p>` : ""}`;
   }
-  return `<p><span class="k">Try</span> ${esc(f.action)}</p><p class="muted small">Check: ${esc(f.how_to_verify)}</p>`;
+  return `<p><span class="k try">Try</span> ${esc(f.action)}</p><p class="muted small">Check: ${esc(f.how_to_verify)}</p>`;
 }
 
 function figuresFor(run, taskIds) {
@@ -530,14 +650,28 @@ async function showResults(run) {
   const p = await api(`/api/runs/${state.runId}/progress?since=0`);
   state.events = p.events;
   state.next = p.next;
-  renderTrace($("#trace-results"), state.events);
+  renderResultsTrace();
 }
+
+// The results page's trace, with its size on the closed summary line.
+function renderResultsTrace() {
+  renderTrace($("#trace-results"), state.events);
+  const ev = state.events.filter(Boolean), t = (s) => Date.parse(s);
+  if (!ev.length) { $("#trace-summary").textContent = ""; return; }
+  const secs = (Math.max(...ev.map((e) => (e.ended_at ? t(e.ended_at) : Date.now()))) - Math.min(...ev.map((e) => t(e.started_at)))) / 1000;
+  const whole = Math.round(secs), span = secs < 60 ? `${secs.toFixed(1)} s` : `${Math.floor(whole / 60)} min ${String(whole % 60).padStart(2, "0")} s`;
+  $("#trace-summary").textContent = `${ev.length} steps · ${span}`;
+}
+
+const WARN = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M8 3.75v5.5M8 12.1v.15"/></svg>';
+const LEAD_AVATAR = '<span class="lead-avatar" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.5"/></svg></span>';
+const leadBubble = (html, extra = "") => `<div class="msg assistant ${extra}">${LEAD_AVATAR}<div class="bubble"><span class="who">Lead</span>${html}</div></div>`;
 
 // The report is its own page (the same HTML as the PDF), shown in a frame sized to its content.
 function showReport(run, report) {
   const base = `/api/runs/${state.runId}`;
   const lost = run.state === "Partial" ? run.state_history.at(-1)?.detail : "";
-  $("#report-status").textContent = lost ? `Incomplete: ${lost}.` : "Every number in it was checked against the measurements.";
+  $("#report-status").innerHTML = `<span class="ic">${lost ? WARN : CHECK}</span><span>${esc(lost ? `Incomplete: ${lost}.` : "Every number in it was checked against the measurements.")}</span>`;
   $("#report-status").classList.toggle("warn", !!lost);
   $("#report-open").href = `${base}/report`;
   $("#report-pdf").href = `${base}/report.pdf`;
@@ -571,8 +705,8 @@ function showFindings(run) {
   $("#res-summary").textContent = fin.summary || "Research ended without firm conclusions.";
   $("#priorities").innerHTML = fin.priorities.map((p, i) => `
     <article class="priority">
-      <div class="priority-n">${i + 1}</div>
-      <div><h3>${esc(p.title)}</h3><p class="muted">${esc(p.why)}</p>
+      <div class="priority-n">${String(i + 1).padStart(2, "0")}</div>
+      <div><h3>${esc(p.title)}</h3><p class="why">${esc(p.why)}</p>
         ${p.finding_refs.map((r) => accepted[r]).filter(Boolean).map((f) => `<div class="finding">${findingHtml(f)}</div>`).join("")}
       </div>
     </article>`).join("");
@@ -591,7 +725,7 @@ function showFindings(run) {
 function renderChat(run) {
   const since = run.research.finished?.at || "";
   const msgs = (run.transcript || []).filter((m) => m.at > since);
-  $("#chat-log").innerHTML = msgs.map((m) => `<div class="msg ${m.role}">${m.role === "assistant" ? md(m.text) : `<p>${esc(m.text)}</p>`}</div>`).join("");
+  $("#chat-log").innerHTML = msgs.map((m) => (m.role === "assistant" ? leadBubble(md(m.text)) : `<p class="msg user">${esc(m.text)}</p>`)).join("");
 }
 
 async function askFollowUp(e) {
@@ -600,14 +734,14 @@ async function askFollowUp(e) {
   if (!text) return;
   input.value = "";
   const log = $("#chat-log");
-  log.insertAdjacentHTML("beforeend", `<div class="msg user"><p>${esc(text)}</p></div><div class="msg assistant pending"><p class="thinking"><span class="spinner"></span><span id="follow-stage">Looking into it…</span></p></div>`);
+  log.insertAdjacentHTML("beforeend", `<p class="msg user">${esc(text)}</p>${leadBubble('<p class="thinking" role="status"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><b id="follow-stage">Looking into it…</b></p>', "pending")}`);
   const timer = setInterval(async () => {
     const p = await api(`/api/runs/${state.runId}/progress?since=${state.next}`).catch(() => null);
     if (!p) return;
     p.events.forEach((ev, i) => { state.events[p.from + i] = ev; });
     state.next = p.next;
     if ($("#follow-stage")) $("#follow-stage").textContent = p.stage;
-    renderTrace($("#trace-results"), state.events);
+    renderResultsTrace();
   }, 1500);
   try {
     await sendChat(text);
@@ -620,7 +754,7 @@ async function askFollowUp(e) {
   const p = await api(`/api/runs/${state.runId}/progress?since=0`);
   state.events = p.events;
   state.next = p.next;
-  renderTrace($("#trace-results"), state.events);
+  renderResultsTrace();
 }
 
 // --- Start ---

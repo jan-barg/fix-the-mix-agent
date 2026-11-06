@@ -5,19 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fix the Mix</title>
   <meta name="description" content="Evidence-based mix and master feedback for electronic music producers." />
+  <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark"><i></i><i></i><i></i><i></i><i></i></span>Fix the Mix</div>
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="10.25" stroke="#14161b" stroke-width="1.5"/><circle cx="12" cy="12" r="5.75" stroke="#e8622a" stroke-width="1.5"/><circle cx="12" cy="12" r="1.75" fill="#14161b"/></svg>
+      <span class="brand-text">Fix the Mix</span>
+    </div>
     <nav class="steps" aria-label="Progress">
-      <span class="step" data-step="upload"><b>1</b>Upload</span>
-      <span class="step" data-step="sections"><b>2</b>Sections</span>
-      <span class="step" data-step="analysis"><b>3</b>Analysis</span>
-      <span class="step" data-step="report"><b>4</b>Report</span>
+      <span class="step" data-step="upload"><b>01</b><span class="lbl">Upload</span></span>
+      <span class="step" data-step="sections"><b>02</b><span class="lbl">Sections</span></span>
+      <span class="step" data-step="analysis"><b>03</b><span class="lbl">Analysis</span></span>
+      <span class="step" data-step="report"><b>04</b><span class="lbl">Report</span></span>
     </nav>
   </header>
 
@@ -31,31 +36,41 @@
           <p class="lede">Upload your mix or master and one to three reference tracks. Fix the Mix measures kick, low end,
             tonal balance, loudness and stereo, compares matching sections like drop against drop, and writes a report
             that shows the evidence behind every suggestion.</p>
-          <div class="limits">
-            <span class="chip">WAV or MP3</span>
-            <span class="chip">Up to 30 MB per file</span>
-            <span class="chip">20 seconds to 10 minutes</span>
-            <span class="chip">Your track + 1–3 references</span>
-          </div>
+          <dl class="limits">
+            <div><dt>Format</dt><dd>WAV or MP3</dd></div>
+            <div><dt>Size</dt><dd>Up to 30 MB per file</dd></div>
+            <div><dt>Length</dt><dd>20 seconds to 10 minutes</dd></div>
+            <div><dt>Tracks</dt><dd>Your track + 1–3 references</dd></div>
+          </dl>
         </div>
-        <ol class="how">
-          <li>Add your track and at least one reference, with a note on what each reference is for.</li>
-          <li>Say what you want from the comparison, or leave it blank for a general check.</li>
-          <li>Check the sections it finds (intro, build, drop…) and fix any it got wrong.</li>
-          <li>Read the report: findings, graphs, timestamps and what to try next.</li>
-        </ol>
+        <div class="how">
+          <span class="eyebrow">How it works</span>
+          <ol>
+            <li><span class="n">01</span><div><b>Add your tracks</b><p>Add your track and at least one reference, with a note on what each reference is for.</p></div></li>
+            <li><span class="n">02</span><div><b>Say what you want</b><p>Say what you want from the comparison, or leave it blank for a general check.</p></div></li>
+            <li><span class="n">03</span><div><b>Check the sections</b><p>Check the sections it finds (intro, build, drop…) and fix any it got wrong.</p></div></li>
+            <li><span class="n">04</span><div><b>Read the report</b><p>Findings, graphs, timestamps and what to try next.</p></div></li>
+          </ol>
+        </div>
       </div>
 
       <div class="global-comment">
-        <label class="field-label" for="global-comment">What do you want from this comparison? <span class="field-hint">Optional</span></label>
-        <textarea id="global-comment" placeholder="e.g. Focus on the drop. I like the darker tone I have now, but my kick disappears when the bass comes in."></textarea>
+        <div>
+          <label class="field-label" for="global-comment">What do you want from this comparison? <span class="field-hint">Optional</span></label>
+          <p class="field-help">The Lead turns this into a brief for the analysis. Leave it blank for a general check.</p>
+        </div>
+        <textarea id="global-comment" rows="3" placeholder="e.g. Focus on the drop. I like the darker tone I have now, but my kick disappears when the bass comes in."></textarea>
       </div>
 
+      <div class="sec-label">
+        <span class="eyebrow">Your tracks</span>
+        <p>Your track and at least one reference are required. A note on each reference tells the Lead what to compare.</p>
+      </div>
       <div class="cards" id="cards"></div>
 
       <div class="actions">
-        <button class="btn primary" id="prepare" type="button" disabled>Prepare tracks</button>
-        <button class="btn ghost" id="demo" type="button">Or try it with the demo tracks</button>
+        <button class="btn primary" id="prepare" type="button" disabled>Prepare tracks<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>
+        <button class="btn" id="demo" type="button">Or try it with the demo tracks</button>
         <span class="muted" id="prepare-hint"></span>
         <span class="form-error" id="upload-error"></span>
       </div>
@@ -73,16 +88,22 @@
         </div>
       </div>
       <div class="lead-strip" id="lead-strip">
-        <div class="lead-head">
-          <span class="lead-avatar" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="lead-name">Lead</span>
-          <span class="badge" id="brief-badge"></span>
+        <div class="lead-main">
+          <div class="lead-head">
+            <span class="lead-avatar" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.5"/></svg></span>
+            <span class="lead-id"><b>Lead</b><span>Writes the brief and runs the analysis</span></span>
+            <span class="badge" id="brief-badge"></span>
+          </div>
+          <div class="lead-msg" id="lead-msg" aria-live="polite"></div>
         </div>
-        <div class="lead-msg" id="lead-msg"></div>
-        <div class="brief" id="brief"></div>
+        <aside class="lead-brief">
+          <span class="eyebrow">The brief</span>
+          <div class="brief" id="brief"></div>
+        </aside>
         <form class="chat-form" id="lead-form">
+          <label class="sr" for="lead-input">Reply to the Lead</label>
           <input id="lead-input" autocomplete="off" placeholder="Answer, or tell the Lead what to change in the brief…" />
-          <button class="btn" type="submit">Send</button>
+          <button class="btn primary" type="submit">Send</button>
         </form>
       </div>
       <div class="keys">
@@ -93,71 +114,87 @@
         <span>drag the waveform to scroll</span>
         <span>hold <kbd>Alt</kbd> while dragging a boundary to ignore the grid</span>
       </div>
-      <div id="editors" style="margin-top:18px"></div>
+      <div id="editors"></div>
       <div class="confirm-bar">
         <span class="muted" id="confirm-status"></span>
-        <button class="btn primary" id="confirm" type="button">Confirm all sections</button>
+        <button class="btn primary" id="confirm" type="button">Confirm all sections<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>
       </div>
     </section>
 
     <!-- Analysis -->
     <section id="view-analysis" hidden>
-      <div class="eyebrow">Step 3</div>
-      <h2>Analysing your track</h2>
-      <p class="lede">The Lead sends specialists to compare kick, low end, tone and loudness, and stereo against your
-        references, then checks the differences that matter most for your goals. This usually takes a few minutes.</p>
-      <div class="stage-card">
-        <span class="stage-pulse" id="stage-pulse" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-        <div class="stage-text">
-          <div class="stage" id="stage">Starting</div>
-          <div class="fun" id="fun"></div>
+      <div class="an-hero">
+        <div>
+          <div class="eyebrow">Step 3</div>
+          <h2>Analysing your track</h2>
+          <p class="lede">The Lead sends specialists to compare kick, low end, tone and loudness, and stereo against your
+            references, then checks the differences that matter most for your goals. This usually takes a few minutes.</p>
+          <div class="stage-box">
+            <span class="eyebrow">Now</span>
+            <div class="stage" id="stage" aria-live="polite">Starting</div>
+            <div class="fun" id="fun"></div>
+            <div class="stage-meta" id="stage-meta"></div>
+          </div>
         </div>
-        <div class="stage-meta mono" id="stage-meta"></div>
+        <div class="dial-card">
+          <div id="dial"></div>
+          <div>
+            <ul class="legend-list" id="dial-legend"></ul>
+            <p class="dial-note">Each ring is one researcher's latest call. A full turn is 60 s.</p>
+          </div>
+        </div>
       </div>
-      <div class="notice" id="analysis-notice" hidden>
-        <span id="analysis-notice-text"></span>
-        <button class="btn" id="resume" type="button">Continue</button>
+      <div class="notice" id="analysis-notice" role="status" hidden>
+        <span class="notice-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.25"/><path d="M8 7.25v3.5M8 5.1v.1"/></svg></span>
+        <div class="notice-text"><span class="tag">Notice</span><div id="analysis-notice-text"></div></div>
+        <button class="btn sm primary" id="resume" type="button">Continue</button>
       </div>
-      <h3 class="sub">What's running</h3>
+      <div class="sec-label"><h3 class="sub">What's running</h3><p class="mono">Click a row for its arguments and result</p></div>
       <div class="trace" id="trace"></div>
     </section>
 
     <!-- Results -->
     <section id="view-results" hidden>
-      <div class="eyebrow">Step 4</div>
-      <h2>Your report</h2>
+      <div class="view-head">
+        <div class="eyebrow">Step 4</div>
+        <h2>Your report</h2>
+      </div>
       <div class="report-bar" id="report-bar" hidden>
-        <p id="report-status"></p>
-        <a class="btn" id="report-open" target="_blank" rel="noopener">Open in a new tab</a>
-        <a class="btn primary" id="report-pdf" download>Download PDF</a>
+        <p class="st" id="report-status"></p>
+        <a class="btn sm" id="report-open" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h4v4M13.5 2.5L7.5 8.5M12 9.5v3.25c0 .41-.34.75-.75.75h-7.5a.75.75 0 01-.75-.75v-7.5c0-.41.34-.75.75-.75H7"/></svg>Open in a new tab</a>
+        <a class="btn sm primary" id="report-pdf" download><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13.5h10"/></svg>Download PDF</a>
       </div>
       <iframe class="report-frame" id="report-frame" title="Mix report" hidden></iframe>
       <!-- Without a written report (an older run, or the Writer failed): the Lead's accepted findings. -->
-      <div id="findings-view" hidden>
-        <p class="lede" id="res-summary"></p>
+      <div class="findings-view" id="findings-view" hidden>
         <div class="notice" id="findings-note"></div>
+        <p class="lede" id="res-summary"></p>
+        <span class="eyebrow">Priorities</span>
         <div class="priorities" id="priorities"></div>
         <div class="two-col">
-          <div class="panel"><h3 class="sub">Keep</h3><ul id="preserve"></ul></div>
-          <div class="panel"><h3 class="sub">Limitations</h3><ul id="limitations"></ul></div>
+          <div class="panel"><span class="eyebrow">Keep</span><ul id="preserve"></ul></div>
+          <div class="panel"><span class="eyebrow">Limitations</span><ul id="limitations"></ul></div>
         </div>
-        <h3 class="sub">Accepted findings</h3>
+        <span class="eyebrow">Accepted findings</span>
         <div class="findings" id="findings"></div>
       </div>
-      <h3 class="sub">Ask a follow-up</h3>
-      <div class="chat-log" id="chat-log"></div>
-      <form class="chat-form" id="chat-form">
-        <input id="chat-input" autocomplete="off" placeholder="e.g. Does the second drop have the same low-end problem?" />
-        <button class="btn primary" type="submit">Ask</button>
-      </form>
-      <details class="trace-box" id="trace-box">
-        <summary>Tool trace</summary>
-        <div class="trace" id="trace-results"></div>
-      </details>
-      <div class="actions">
-        <button class="btn" id="edit-sections" type="button">Edit sections and run again</button>
-        <span class="muted mono" id="res-usage"></span>
-      </div>
+      <section class="followup" aria-label="Follow-up">
+        <span class="eyebrow">Ask a follow-up</span>
+        <div class="chat-log" id="chat-log"></div>
+        <form class="chat-form" id="chat-form">
+          <label class="sr" for="chat-input">Ask a follow-up</label>
+          <input id="chat-input" autocomplete="off" placeholder="e.g. Does the second drop have the same low-end problem?" />
+          <button class="btn sm primary" type="submit">Ask</button>
+        </form>
+        <details class="trace-box" id="trace-box">
+          <summary><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5l4.5 4.5L6 12.5"/></svg>Tool trace<span class="mono" id="trace-summary"></span></summary>
+          <div class="trace" id="trace-results"></div>
+        </details>
+        <div class="end-actions">
+          <button class="btn" id="edit-sections" type="button">Edit sections and run again</button>
+          <span class="mono" id="res-usage"></span>
+        </div>
+      </section>
     </section>
   </main>
 
