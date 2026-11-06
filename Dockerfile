@@ -1,8 +1,9 @@
 FROM python:3.12-slim
 
-# FFmpeg decodes uploads and runs the ebur128 loudness meter.
+# FFmpeg decodes uploads and runs the ebur128 loudness meter. Pango and HarfBuzz let WeasyPrint render the
+# PDF report; Inter is the typeface of the charts and the PDF (the web pages load it from Google Fonts).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-inter \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /uvx /bin/

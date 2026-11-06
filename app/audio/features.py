@@ -8,6 +8,7 @@ cache/features/<sha256>-<config_version>.npz, so demo tracks are analysed only o
 import hashlib
 import io
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,6 +59,14 @@ class TrackData:
 def clock(t: float) -> str:
     """m:ss, as the section editor shows times."""
     return f"{int(t // 60)}:{int(t % 60):02d}"
+
+
+EVENT_TIME = re.compile(r"\bat (\d+(?:\.\d+)?) s\b")
+
+
+def clock_events(text: str) -> str:
+    """Event times as m:ss for display ("kick at 115.61 s" -> "kick at 1:55"). Evidence names keep seconds."""
+    return EVENT_TIME.sub(lambda m: f"at {clock(float(m.group(1)))}", text)
 
 
 @dataclass(frozen=True)

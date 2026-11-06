@@ -173,6 +173,72 @@ class FinishResearchArgs(BaseModel):
                                      "to keep. No internal IDs.")
 
 
+# --- Report (DESIGN.md §7.4) ---
+
+
+class Claim(BaseModel):
+    name: str = Field(description='The scalar\'s exact name, as listed under "Measured values": the text before " = ".')
+    value: float = Field(description="As shown, or rounded.")
+    unit: str
+    evidence_id: str
+
+
+ReportSection = Literal["overview", "preserve", "general", "kick_low_end", "stereo", "section_by_section",
+                        "method_notes", "limitations"]
+REPORT_SECTIONS: tuple[str, ...] = ("overview", "preserve", "general", "kick_low_end", "stereo", "section_by_section",
+                                    "method_notes", "limitations")
+
+
+class Para(BaseModel):
+    section: ReportSection
+    text: str = Field(description="Plain prose for the producer. No IDs, no Markdown.")
+    claims: list[Claim] = Field(description="Every number with a unit in the text, each tied to its scalar.")
+    figure_ids: list[str] = Field(description="Figures to show after this paragraph (fig_...), usually zero or one.")
+
+
+class ReportPriority(BaseModel):
+    title: str = Field(description="The change, in a few words.")
+    why: str = Field(description="Why it matters for the producer's goals.")
+    observation: str = Field(description="What was measured, plainly.")
+    interpretation: str = Field(description="What could cause it, worded as a hypothesis. Empty if none was accepted.")
+    experiment: str = Field(description="What to try in the session.")
+    verification: str = Field(description="How to check the result.")
+    claims: list[Claim] = Field(description="Every number with a unit in title, why, observation, interpretation "
+                                            "and verification.")
+    figure_ids: list[str]
+
+
+class ReportDraft(BaseModel):
+    """One flat list of paragraphs, each naming its section: a schema with a field per section is too
+    large for strict structured output."""
+
+    priorities: list[ReportPriority] = Field(description="The Lead's priorities, in its order. At most three.")
+    paragraphs: list[Para] = Field(description="Every other paragraph of the report, in reading order.")
+
+    def section(self, name: str) -> list[Para]:
+        return [p for p in self.paragraphs if p.section == name]
+
+
+class FixedBlock(BaseModel):
+    id: str = Field(description='The block ID from the list of problems, e.g. "priority2.observation" or "paragraphs.5".')
+    text: str
+    claims: list[Claim] = Field(description="Every claim the corrected text needs.")
+
+
+class FixedBlocks(BaseModel):
+    blocks: list[FixedBlock] = Field(description="Only the blocks that had problems, corrected.")
+    new_paragraphs: list[Para] = Field(description="Paragraphs for required sections that were missing; else empty.")
+
+
+class EditedBlock(BaseModel):
+    id: str
+    text: str
+
+
+class EditedBlocks(BaseModel):
+    blocks: list[EditedBlock]
+
+
 # --- Schema helpers ---
 
 

@@ -15,7 +15,7 @@ SPEC.md says *what* the system does and the rules it must follow. This document 
 | Audio decoding | FFmpeg subprocess → float32 NumPy array, first audio stream only (`-map 0:a:0`; ignores embedded cover art) |
 | Signal processing | NumPy, SciPy (filters, STFT), librosa (beat tracking, onset strength) |
 | Loudness and peaks | FFmpeg `ebur128` filter with `metadata=1` + `ametadata=print`, run on the peak-normalised signal piped in as float. Verified on the demo corpus: 100 ms M/S/I/LRA readings plus per-channel sample and true peaks, ~1 s for a 5-minute track |
-| Charts | matplotlib (Agg backend) → PNG, rendered only from measured arrays |
+| Charts | matplotlib (Agg backend) → PNG, rendered only from measured arrays, in the app's dark palette and typeface (§10) |
 | Frontend | Vanilla HTML/JS/CSS like the starter, no build step. wavesurfer.js v7 with the regions and timeline plugins for the section editor |
 | Report | Jinja2 HTML template; the same HTML is rendered to PDF with WeasyPrint |
 | Storage | Google Cloud Storage bucket in production; local `.data/` directory in development, behind one storage interface |
@@ -57,20 +57,21 @@ app/
     context.py         what agents can name: sections ("drop 2"), matched pairs, scope references
     toolbox.py         measurement tools as agents call them: scope references in, cached Evidence out
     researchers.py     default evidence bundles, researcher calls, the values check
-    writer.py          report drafting with structured output
-    humanizer.py       deferred stage (skipped unless a skill file is configured)
+    writer.py          the Writer: its input, the structured draft, one targeted repair (§7.4)
+    humanizer.py       prose edit after the Writer; undoes any block edit that changes protected content (§7.6)
     schemas.py         Pydantic models for researcher results and the report
-    prompts/           lead.md, researcher_base.md, kick.md, low_end.md, tonal_loudness.md, stereo.md (writer.md on day 5)
+    prompts/           lead.md, researcher_base.md, kick.md, low_end.md, tonal_loudness.md, stereo.md, writer.md,
+                       humanizer.md (adapted from the humanizer skill, with its MIT licence in humanizer-LICENSE.txt)
   report/
-    validate.py        numbers, figure links, internal-ID leaks, required sections
-    render.py          Jinja2 → HTML, WeasyPrint → PDF
+    pipeline.py        finished research → Writer → Humanizer → final check → HTML → PDF; the report states
+    validate.py        numbers, figure links, internal-ID leaks, required sections; what is dropped when a check fails
+    render.py          Jinja2 → HTML (figures by URL) and → PDF (figures inline) with WeasyPrint
     templates/report.html
 static/
   index.html  styles.css
-  app.js               views, uploads, the Lead's brief, analysis progress and trace, results, follow-ups
+  app.js               views, uploads, the Lead's brief, analysis progress and trace, the report, follow-ups
   editor.js            canvas section editor: three-band waveform, grid, boundaries, playback
   progress-messages.js rotating progress lines (SPEC §2.4)
-  report.js            (day 5)
 demo/
   corpus.json          demo track list: roles, comments, origin (audio itself is not in git)
   audio/               local copies of demo audio (git-ignored; uploaded to the bucket)
@@ -110,7 +111,7 @@ POST /clear?session_id=...
 }
 ```
 
-- `agent` is `lead` or `<specialist> researcher` (`kick researcher`, `low_end researcher`, …); the Writer and Humanizer join on day 5.
+- `agent` is `lead` or `<specialist> researcher` (`kick researcher`, `low_end researcher`, …); `writer` and `humanizer` for the report stages.
 - `kind` is `llm_tool_call` (the Lead asked for it), `helper` (code ran a measurement, for the Lead or for a researcher's bundle), or `model_call` (a Lead turn or a researcher call). Model calls add `model`, `input_tokens`, `output_tokens`, `cost_usd` and `seconds`; helpers add `evidence_id` and `cached`.
 - `parent_task_id` links a researcher's helpers and model call to the Lead's `run_researcher` call, and a measurement's helper to the Lead's tool call. `round` is set on everything in a research round.
 - `status` is `running` (still going, seen only in progress polls), `ok`, `error` or `interrupted` (left running by a process that stopped).
@@ -123,7 +124,7 @@ POST /clear?session_id=...
 |---|---|---|---|
 | Brief | When the sections view opens: the global comment, or a default request if it is empty | The first message carries the run overview (tracks, comments, sections, matched pairs), so the Lead needs no tool call to read it. It either calls `record_brief` or asks one question | Clarifying question, or a summary of the brief with a request to check the sections |
 | Clarify | The user's answer | Lead continues the same conversation | As above |
-| Research | "Sections confirmed — run the analysis." (sent when the user confirms all maps) | Lead plans, fans out researchers, follows up, calls `finish_research`; then (day 5) Writer → Humanizer (if configured) → validation → HTML + PDF. Until the Writer exists the run ends `Partial` | The `finish_research` summary; the full trace in `tool_calls` |
+| Research | "Sections confirmed — run the analysis." (sent when the user confirms all maps) | Lead plans, fans out researchers, follows up, calls `finish_research`; then Writer → Humanizer → validation → HTML + PDF (§10). Ends `Complete`, or `Partial` with the reason | The `finish_research` summary; the full trace in `tool_calls` |
 | Follow-up | Any question | Lead answers using existing evidence, running new measurements or researchers when the question needs them (one extra round per question) | The answer, plus its trace |
 
 The Lead keeps one append-only conversation per run (§7.1). Every user message gets a `[Run status]` block appended by the harness (phase, whether the sections are confirmed and the brief recorded, rounds and turns used), which the producer never sees. A second message while one is running returns at once with "I'm still working on your previous message" instead of starting another loop. A session ID that is not a run gets the starter's plain chat, without tools.
@@ -143,7 +144,7 @@ The Lead keeps one append-only conversation per run (§7.1). Every user message 
 | `GET` / `PUT /api/runs/{run}/tracks/{track}/sections` | Read the current section map, or save a user-edited map (creates a new version) |
 | `POST /api/runs/{run}/sections/confirm` | Mark all current maps as confirmed |
 | `GET /api/runs/{run}/figures/{figure_id}` | A figure PNG from the run's evidence |
-| `GET /api/runs/{run}/report`, `/report.pdf` | Report artifacts (day 5) |
+| `GET /api/runs/{run}/report`, `/report.pdf` | The report as a standalone HTML page (figures from the figures route) and the PDF as a download. 404 until the report exists; the PDF route says why when rendering failed |
 | `POST /api/demo` | Create a run from the demo corpus without uploading. Frozen tracks (below) start from their checked section maps without a download or decode |
 | `GET /api/health` | Liveness check (`/healthz` is reserved on `run.app`) |
 
@@ -188,7 +189,8 @@ Run
   evidence_by_key{cache_key: evidence_id}
   usage: calls, input_tokens, output_tokens, cost_usd
   transcript[]: role, text, at        what the producer said and the Lead answered
-  report: status, html_path, pdf_path, humanizer: skipped | applied | reverted, validation[]   (day 5)
+  report: status (writing | ready | failed), html_path, pdf_path, pdf_error, error,
+          checks{first, final, removed[]}, humanizer{status: applied | skipped | failed, edited[], reverted[]}
 ```
 
 The Lead's own conversation (the messages exactly as sent and returned, thinking blocks included) is in `runs/{run_id}/lead.json`, so the run document the UI polls stays small. Progress is derived from the trace (§8), not stored.
@@ -203,7 +205,7 @@ runs/{run_id}/tracks/{track_id}/{sha256[:16]}.{mp3|wav}   named by content: a re
 runs/{run_id}/evidence/{evidence_id}.json      record (§6)
 runs/{run_id}/evidence/{evidence_id}.npz       arrays, when present
 runs/{run_id}/figures/{figure_id}.png
-runs/{run_id}/report/report.json | report.html | report.pdf
+runs/{run_id}/report/draft.json | final.json | report.html | report.pdf   the Writer's checked draft, the edited text
 cache/features/{sha256}-{config_version}.npz   whole-track base analysis, shared across runs
 cache/peaks/{sha256}-{config_version}.json     waveform peaks for the editor
 demo/audio/*.mp3, demo/corpus.json
@@ -341,8 +343,8 @@ All model calls go through `app/agents/llm.py`, a thin wrapper over `litellm.aco
 |---|---|---|---|
 | Lead | `anthropic/claude-opus-5-5` (`LEAD_MODEL`) | `high` | Tool calls and chat text |
 | Researchers (4 specialists) | `anthropic/claude-sonnet-5-5` (`RESEARCHER_MODEL`) | `medium` | `ResearcherResult` JSON, validated with Pydantic |
-| Writer | `anthropic/claude-opus-5-5` (`WRITER_MODEL`) | `high` | `ReportDraft` JSON, validated with Pydantic |
-| Humanizer (deferred) | `anthropic/claude-opus-5-5` (`HUMANIZER_MODEL`) | `medium` | Same `ReportDraft` schema with only prose fields changed |
+| Writer | `anthropic/claude-opus-5-5` (`WRITER_MODEL`) | `medium` | `ReportDraft` JSON, validated with Pydantic; `FixedBlocks` for the repair |
+| Humanizer | `anthropic/claude-opus-5-5` (`HUMANIZER_MODEL`) | `medium` | `EditedBlocks`: the same prose blocks, reworded |
 | README baselines | same as the Lead (`BASELINE_MODEL`) | default | Plain text |
 
 Switching a role is one env var, for example `RESEARCHER_MODEL=vertex_ai/gemini-3.5-flash-lite`.
@@ -357,7 +359,7 @@ What the wrapper does:
 - **Parallel tool calls:** all `run_researcher` calls in one Lead response run concurrently with `asyncio.gather`. Each gets its own `tool` message; a failed call returns an error result rather than being dropped.
 - **Append-only history:** each assistant message is appended exactly as returned (`model_dump()`, as in the starter, which keeps Claude's `thinking_blocks`), and earlier turns are never edited.
 - **Constant tool set:** the Lead has the same tools in every phase, and the harness rejects out-of-phase calls with an error result. Changing tool definitions mid-conversation would break prompt caching.
-- **Prompt caching:** `cache_control` on the Lead's system prompt, which LiteLLM passes through to Anthropic. The system prompt and tool list are byte-stable (no timestamps or run IDs in them).
+- **Prompt caching:** `cache_control` on the Lead's system prompt, which LiteLLM passes through to Anthropic. The system prompt and tool list are byte-stable (no timestamps or run IDs in them). The Writer is not cached: its repair asks for a different JSON schema, which invalidates the cache, so a cache write only added 25% to the first call. The log line shows cache reads and writes per call.
 - **Failures:** a `finish_reason` other than a normal stop or tool call (for example `length` or `content_filter`) is treated as a failed call with its reason recorded. LiteLLM's retries handle 429/5xx, and service retries do not count as research rounds.
 - **Usage:** tokens and `litellm.completion_cost` are logged per call and per run.
 
@@ -419,27 +421,34 @@ Each call is a separate measurement, so the `… minus …` differences compare 
 
 ### 7.4 Writer
 
-- **Inputs:** the brief, the Lead's accepted findings with their researcher results, Lead priorities and limitations, and the figure catalogue (figure ID, title, generated caption, what it compares).
-- **Output (`ReportDraft`):**
-  - `priorities[≤3]`, each with title, why it matters, observation, experiment, verification and figure IDs.
-  - `preserve[]`.
-  - `sections`: general, kick_low_end, stereo, section_by_section, method_notes. Each section is a list of blocks: paragraphs with text and claims[]{value, unit, evidence_id}, and figure blocks.
-  - `limitations[]`.
-- **Rendering:** figures and captions are rendered by code; the Writer chooses which figures to show and where.
+- **Inputs** (`writer.build_messages`): the brief and the producer's comments, tracks with tempos and sections, the Lead's decisions (summary, priorities with the findings they cite, what to keep, limitations), the accepted findings grouped by researcher, the figures that can be shown (ID, title and a caption with clock times), and the measured values of the evidence behind those findings. Rejected findings are left out.
+- **Output (`ReportDraft`),** one strict JSON schema:
+  - `priorities[]`, at most three and in the Lead's order: title, why it matters, observation, interpretation (a hypothesis, or empty), experiment, verification, claims and figure IDs.
+  - `paragraphs[]` in reading order, each with a `section` (overview, preserve, general, kick_low_end, stereo, section_by_section, method_notes, limitations), text, claims and figure IDs. A claim names a scalar exactly, with its value, unit and evidence ID.
+  - The first schema had one list per section. Anthropic rejected it ("the compiled grammar is too large"), so the sections became a field of a flat list.
+- **Prompt** (`prompts/writer.md`): only what was accepted; every number with a unit is claimed, quoted from a `... minus ...` scalar instead of computed, and rounded the way an engineer says it (levels to 0.1 dB, frequencies, times and percentages to whole numbers); observation, interpretation and experiment kept apart; each aspect compared with the reference the brief assigns to it; track and section names, never internal IDs; each figure at most once; plain text.
+- **Repair:** if the draft fails a check (§7.5), the Writer gets the problems with each failing block's current text and returns only the corrected blocks (`FixedBlocks`, plus paragraphs for a missing required section). Asking for the whole report again cost $0.58; a targeted repair costs about $0.19.
+- **Effort:** `medium`. At `high` the Writer thought for 29k tokens (4 minutes, $0.80) on a three-priority report. At `medium`: 54 s and $0.26.
+- **Rendering:** figures and captions are rendered by code; the Writer only chooses which figures to show and where.
 
 ### 7.5 Validation and repair (before rendering)
 
-1. Every figure ID exists and its file was rendered.
-2. Every number with a unit in the prose (regex covering dB, LUFS, LU, dBTP, dBFS, Hz, kHz, ms, s, BPM, %, beats, bars) matches a claim whose value matches the cited evidence after rounding.
-3. No internal identifiers (`ev_`, `trk_`, `sec_`, `t_`) appear in the prose.
-4. All required sections are present, and there are no more than three priorities.
+`report/validate.py` checks each block (a priority field or a paragraph):
 
-Violations go back to the Writer once, with the list of problems. Anything still failing is dropped from the report, and the run ends `Partial` with the reason shown.
+1. **Numbers:** every number with a unit (dB, LUFS, LU, dBTP, dBFS, Hz, kHz, ms, %, beats, bars, BPM; both ends of a range) needs a claim in the same block whose scalar exists in the cited evidence and whose value matches it after rounding to the quoted precision. Rounding twice is accepted (−29.649 shown as −29.65 in a finding, then written as −29.7). Exempt: numbers that name things (band edges, windows, thresholds from the evidence), frequencies that accepted findings state, the tracks' tempos, and a priority's experiment (suggested settings).
+2. **Internal identifiers** (`ev_`, `fig_`, `trk_`, `sec_`, finding references like `t_05/o1`) never appear in prose.
+3. **Figures:** every figure ID exists in the evidence behind the accepted findings.
+4. **Structure:** at most three priorities, and every required section (overview, general, kick_low_end, stereo, section_by_section, method_notes) has a paragraph.
 
-### 7.6 Humanizer (deferred)
+Problems go back to the Writer once (§7.4). What still fails is dropped: a failing title, why, observation or experiment drops the whole priority; a failing interpretation or verification is left empty; a failing paragraph is removed; an unknown figure ID is removed. The report's footer lists what was removed. The run ends `Partial` when a priority or a required section was lost, or the PDF failed, and `Complete` otherwise.
 
-- **Skipped:** when `HUMANIZER_SKILL_PATH` is unset, the stage is skipped and the run records `humanizer: skipped`.
-- **When configured:** the skill text becomes the system prompt, and only prose fields are sent. Protected tokens (numbers with units, track and section names, figure references, hedging words that mark hypotheses) are compared before and after the edit. Any change reverts that block to the Writer's version.
+### 7.6 Humanizer
+
+- **Source:** `prompts/humanizer.md` adapts the humanizer skill v3.1.0 by Siqi Chen (github.com/blader/humanizer, MIT licence, kept next to it) to this report: its 25 patterns of AI writing (inflated significance, promotional words, filler, rule of three, em dashes, and so on) with audio examples, a mix engineer's voice, and when to leave a sentence alone.
+- **Input and output:** the prose blocks as JSON (`{id, kind, text}`); the reply returns only the blocks it changed (`EditedBlocks`). Claims and figure IDs are not sent and cannot change.
+- **Protected content:** for each edited block, code compares the numbers, the numbers with their units, track names ("your track", "Reference 2"), section names from the run's maps, and whether a hedge ("could", "may", "is consistent with") is present. Any difference reverts that block to the Writer's text and is recorded with the reason.
+- **Off switch:** `HUMANIZER=off` skips the stage (`humanizer: skipped`). A failed call keeps the Writer's text. The report's footer says which happened.
+- **Cost:** about 30 s and $0.12 per report.
 
 ## 8. Trace
 
@@ -466,20 +475,22 @@ The frontend is one page with five views, switched by run state:
    - "Accept" per track saves a new map version. "Confirm all" saves any unaccepted maps as they are, then confirms. Leaving the page with unsaved edits asks first.
    - The run ID sits in the URL hash, so a reload returns to the same run and view.
 4. **Analysis:** confirming sends "Sections confirmed — run the analysis." and polls `/progress` every 1.5 s: the plain stage ("Comparing low-end, Comparing kicks", "Checking a difference: …", "Weighing the findings"), a fun line rotating every 4 s from a pool for whatever is running (`progress-messages.js`, e.g. "Feeling the bass thump in the chest", "Mono-Stereo-Mono-Stereo… ARGHHHHHHH"), the round and cost so far, and the live timeline of the current request. When no request is running any more, the page shows whatever the run reached. A reload during a run returns here and keeps polling; an `Interrupted` run offers "Continue".
-5. **Results (day 4) / Report (day 5):** for now, the `finish_research` summary, the priorities with the findings they cite, what to keep, limitations, accepted findings by specialist with their measured values and figures, follow-up chat (with the stage shown while it works), the full trace, cost, and "Edit sections and run again". Day 5 replaces the findings list with the written report and PDF.
+5. **Report:** while the report is written, the analysis view shows the stage ("Writing the report", "Editing the wording", "Checking every number", "Rendering the report and PDF"). Then the report page is embedded in a same-origin iframe sized to its content (anchor links scroll the outer page), with a status line (and the reason when `Partial`), "Open in a new tab" and "Download PDF". Below it: follow-up chat (with the stage shown while it works), the full trace, cost, and "Edit sections and run again". When no report exists (it failed, or the run is older), the day-4 findings view is shown instead.
 
 Track colours are fixed: your track plus References 1–3, with a distinct style for a combined target. The same values are used in the CSS and in `figures.py`.
 
 ## 10. Report and PDF
 
-- **HTML:** a Jinja2 template renders `ReportDraft` plus the figure catalogue into one HTML document. The web view serves it with figure URLs.
-- **PDF:** WeasyPrint renders the same template with print CSS and local figure paths.
-- **Captions:** each caption appears under its figure and links to it. Timestamps appear in an expandable "source details" line.
-- **PDF failure:** if PDF rendering fails, the web report and chat answer are still delivered, and the failure is shown (SPEC §10).
+- **Pipeline** (`report/pipeline.py`, states `Writing` → `Humanizing` → `Validating` → `Rendering`): starts when the Lead calls `finish_research`, inside the same request. A Writer failure ends the run `Partial` with the error and keeps the findings view. A resumed run in one of these states starts the report again.
+- **HTML:** `templates/report.html` renders the checked draft: masthead with the tracks and their roles, the brief, the overview, numbered priority cards (Measured / Possible cause / Try / Check, then their figures), what to keep, the topic sections, method settings, limitations, sources, and a footer with the checks line and the Humanizer line. The web version loads figures from the figures route.
+- **Figures:** each is placed once, where the Writer first shows it, with its title, the tool that made it, a generated caption, and "Source details" (the compared passages with timestamps, and any reliability warnings).
+- **PDF:** WeasyPrint renders the same template with print CSS (A4, the same dark background, page numbers) and figures inlined as data URIs. It needs Pango and HarfBuzz (in the Dockerfile; locally `brew install pango`). Cards, figures and table rows do not break across pages. A 15-page report renders in about 1 s.
+- **PDF failure:** if PDF rendering fails, the web report and chat answer are still delivered, the run ends `Partial`, and the PDF route returns the reason (SPEC §10).
+- **Design:** the report, the charts and the app share one dark palette (background #111419, the track colours of §9, the section colours of the editor) and the Inter typeface (Google Fonts on the web; `fonts-inter` in the container for the charts and the PDF). Charts have no titles inside the image (the report captions them), a legend in a row above the plot, a one-line method note below, and 7.5 × N in at 200 dpi, so their 8-9.5 pt text reads at about 11 px where the report shows them and 7 pt on an A4 page. Section labels on time charts are clipped to the plotted passage: a label outside it once stretched a tight-cropped chart to 35,203 px, which the model API refuses (8,000 px limit), and every call of that researcher failed. A chart wider than twice its nominal size is now re-saved uncropped.
 
 ## 11. Deployment
 
-- **Container:** `python:3.12-slim` plus `apt-get install ffmpeg libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core`, then `uv sync --frozen`. It runs `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+- **Container:** `python:3.12-slim` plus `apt-get install ffmpeg libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-inter`, then `uv sync --frozen`. It runs `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
 - **Service:**
 
   ```bash
@@ -520,13 +531,15 @@ Track colours are fixed: your track plus References 1–3, with a distinct style
   - Ducking: a sine bass with a known sidechain envelope plus kicks recovers within tolerance; an un-ducked bass reports no dip; a changing bass line is marked unavailable; noise without kicks reports no ducking in any band (§5.5).
   - Kicks: exposed kicks outrank kicks over a bass note, with clearly higher isolation, and are not called weaker; the body band reads 45, 60 and 90 Hz tones within 0.5 dB.
   - Runs: concurrent requests for one file decode it once; measurements use the grid the user set; concurrent writes to one path do not collide.
+  - Report (scripted Writer and Humanizer): unclaimed, wrong and twice-rounded numbers; the exemptions; internal IDs, unknown figures and missing sections; what is dropped; Humanizer edits that change a number, a track name, a section name or a hedge are reverted, and `HUMANIZER=off` skips the call; the whole pipeline ends `Complete` with the HTML and PDF routes and each figure shown once; a PDF failure or a Writer failure ends `Partial` with the reason; a passage chart ignores sections outside the passage and stays under the size limit.
   - Agents (a scripted fake model, no network): repeated labels get ordinals and pair by order, and a section without a partner gets none; scope references resolve to the named ranges and bad ones are refused with a reason; the values check passes rounded and sign-dropped quotes and flags wrong values, unknown names, evidence the researcher was not given, and unbacked numbers in prose (but not suggested settings); a research message fans out two researchers that overlap in time, runs a second round, and finishes `Partial` with the accepted findings, rounds 1 and 2 on the trace; the round cap turns researcher calls into errors; `finish_research` refuses unknown references, findings with check warnings and priorities citing unaccepted findings; the brief phase refuses measurements and waits in `NeedsClarification`, then records the brief; a second message while working is refused and edits get 409; a run left `Researching` by a dead process loads as `Interrupted` and resumes with its dangling tool call answered; editing sections after research archives the findings.
   - Not covered by tests: the browser editor (escaping, the save race) is checked by hand; the constant-tempo check can miss a tempo change or phase jump when one part of the track does not line up at all, because such windows get almost no weight.
 - **Agent runs on the demo corpus** (`scripts/demo_research.py`, and the same flow in the browser), November 5, with the draft demo comments:
   - Brief: the Lead recorded a brief in `aspects` mode (Reference 1 for kick and bass weight, Reference 2 for the build-to-drop jump, Reference 3 for width with its top end excluded, stage master) and asked the producer to check four specific section boundaries.
   - Research, two runs: round 1 sent all four specialists in parallel (their bars overlap in the trace); between rounds the Lead ran `find_kick_candidates`, `analyse_kick` and `measure_low_end` itself to check a second drop; round 2 sent targeted kick and low-end follow-ups. Both runs ended with the same three priorities (kick attack relative to body, excess sub below about 35 Hz with a weak 44 Hz fundamental, very deep upper-bass ducking), 52 and 61 accepted findings, and 13 and 8 rejected with reasons (mostly check warnings). 136 s and $1.17; about 150 s and $0.85.
   - A follow-up question about low-end width against Reference 3 was answered from existing evidence in one Lead call ($0.18), and the run returned to `Partial`.
-  - Still to check: a vague request triggering clarification on the real model, the round cap on the real model, and report validation (day 5).
+  - Still to check: a vague request triggering clarification on the real model, and the round cap on the real model.
+- **Report runs on the demo corpus** (November 6, `scripts/demo_research.py`, brief → research → report in-process): 231 s and $1.53 in all. The Writer took 54 s ($0.26) for 2 priorities and 19 paragraphs; 3 blocks failed the number check (two of them rounded twice, which the check now accepts), and the repair fixed all three in 15 s ($0.19). The Humanizer edited 3 blocks in 32 s ($0.12) with none reverted. The run found the oversized-chart bug of §10: the tonal researcher failed in all three rounds.
 - **Baselines:** `scripts/baselines.py` sends each README sample question to the Lead's model through LiteLLM with no tools and no system prompt, and stores the raw answers.
 
 ### Demo corpus
@@ -553,8 +566,8 @@ Roles and comments for the demo live in `demo/corpus.json` and can change withou
 | 2 | Fri Nov 6 | Base analysis, grid, all measurement tools, figures, evidence records, synthetic tests | Every tool produces sensible numbers and charts for all four demo tracks |
 | 3 | Sat Nov 7 | Upload view and endpoints, section proposal, section editor | A run goes from upload to confirmed maps in the browser |
 | 4 | Sun Nov 8 | Lead loop, tools, clarification, parallel researchers, round cap, trace, progress | A research run produces accepted findings with a follow-up round visible in the trace. **Done November 5** (§12) |
-| 5 | Mon Nov 9 | Writer, validation and repair, HTML report, PDF, chart and report visual design pass (§14), follow-up chat, full run on Cloud Run | The deployed app produces a report and PDF from the demo corpus |
-| 6 | Tue Nov 10 | README (data loading, three sample queries with real answers, baselines), `submission.json`, polish, Humanizer if supplied | Submission-ready |
+| 5 | Mon Nov 9 | Writer, validation and repair, HTML report, PDF, chart and report visual design pass (§14), follow-up chat, full run on Cloud Run | The deployed app produces a report and PDF from the demo corpus. **Report pipeline, Humanizer and design pass done November 6** (§7.4-§7.6, §10); the Cloud Run run is next |
+| 6 | Tue Nov 10 | README (data loading, three sample queries with real answers, baselines), `submission.json`, polish | Submission-ready |
 | — | Wed Nov 11 | Buffer and submission | |
 
 If the schedule slips, cut in this order: kick pitch trajectory → section-label heuristics (leave all as "unknown") → combined-target averaging beyond tonal curves → follow-up chat after the report. Never cut parallel researchers, follow-up rounds, clarification, the trace, or the Cloud Run deployment.
@@ -563,10 +576,7 @@ If the schedule slips, cut in this order: kick pitch trajectory → section-labe
 
 | Item | Needed by |
 |---|---|
-| Visual design pass for charts and the report. The figures are correct but look like plain matplotlib; they need a designed, polished look (typography, palette, spacing, consistent with the web report and PDF). Content and data stay as they are | Day 5 |
 | Comments and reference roles for the demo corpus (`demo/corpus.json`): drafted on November 5 for the demo runs; the producer should confirm or replace them | Day 5 |
-| Checked section maps for the demo tracks: the producer corrects them in the editor, then `scripts/freeze_demo.py` | Day 5 |
-| The values check flags any unexplained frequency in comparisons and interpretations ("around 90 Hz"), and the Lead rejected a few otherwise sound interpretations for it. Loosen for Hz if the report loses useful findings | Day 5 |
+| The researchers' values check flags any unexplained frequency in comparisons and interpretations ("around 90 Hz"), and the Lead rejected a few otherwise sound interpretations for it. The report accepts frequencies that accepted findings state (§7.5); loosen the researchers' check too if useful findings keep getting lost | Day 6 |
 | The Lead's chat replies (brief summary, follow-up answers) are not run through the report's number validation; the prompt asks it to quote measured values only | Day 5 |
 | BPM and drop timestamps of the demo tracks from the producer, to check the grid and section proposals (detected: Scars Extended and Radio 134, Endless Light 134, FE!N 136, Weightless 130; the producer called the 134.07 reading on Scars a detection error) | Day 4 |
-| Humanizer skill file | Any time; the stage is skipped until then |

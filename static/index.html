@@ -125,17 +125,25 @@
     <!-- Results -->
     <section id="view-results" hidden>
       <div class="eyebrow">Step 4</div>
-      <h2>What to work on</h2>
-      <p class="lede" id="res-summary"></p>
-      <div class="notice">The written report with graphs and timestamps arrives in the next update. For now, these are
-        the findings the Lead accepted, with the measurements behind them.</div>
-      <div class="priorities" id="priorities"></div>
-      <div class="two-col">
-        <div class="panel"><h3 class="sub">Keep</h3><ul id="preserve"></ul></div>
-        <div class="panel"><h3 class="sub">Limitations</h3><ul id="limitations"></ul></div>
+      <h2>Your report</h2>
+      <div class="report-bar" id="report-bar" hidden>
+        <p id="report-status"></p>
+        <a class="btn" id="report-open" target="_blank" rel="noopener">Open in a new tab</a>
+        <a class="btn primary" id="report-pdf" download>Download PDF</a>
       </div>
-      <h3 class="sub">Accepted findings</h3>
-      <div class="findings" id="findings"></div>
+      <iframe class="report-frame" id="report-frame" title="Mix report" hidden></iframe>
+      <!-- Without a written report (an older run, or the Writer failed): the Lead's accepted findings. -->
+      <div id="findings-view" hidden>
+        <p class="lede" id="res-summary"></p>
+        <div class="notice" id="findings-note"></div>
+        <div class="priorities" id="priorities"></div>
+        <div class="two-col">
+          <div class="panel"><h3 class="sub">Keep</h3><ul id="preserve"></ul></div>
+          <div class="panel"><h3 class="sub">Limitations</h3><ul id="limitations"></ul></div>
+        </div>
+        <h3 class="sub">Accepted findings</h3>
+        <div class="findings" id="findings"></div>
+      </div>
       <h3 class="sub">Ask a follow-up</h3>
       <div class="chat-log" id="chat-log"></div>
       <form class="chat-form" id="chat-form">

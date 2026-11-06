@@ -18,6 +18,7 @@ from app import runs, trace
 from app.agents import context, llm, researchers, schemas, toolbox
 from app.audio.features import clock
 from app.config import settings
+from app.report import pipeline
 from app.runs import Run, now
 
 log = logging.getLogger(__name__)
@@ -155,7 +156,8 @@ SPECIALIST_STAGE = {"kick": "Comparing kicks", "low_end": "Comparing low-end",
                     "tonal_loudness": "Comparing tone and loudness", "stereo": "Comparing stereo"}
 STATE_STAGE = {"Draft": "Waiting for tracks", "Preparing": "Preparing tracks", "ReviewingSections": "Review sections",
                "NeedsClarification": "Waiting for your answer", "FollowingUp": "Looking into your question",
-               "Writing": "Writing report", "Partial": "Done", "Complete": "Done", "Failed": "Failed",
+               "Writing": "Writing the report", "Humanizing": "Editing the wording", "Validating": "Checking every number",
+               "Rendering": "Rendering the report and PDF", "Partial": "Done", "Complete": "Done", "Failed": "Failed",
                "Interrupted": "Interrupted: send a message to continue"}
 
 
@@ -286,10 +288,8 @@ async def _finish_research(ctx: _Context, raw: dict, task_id: str) -> str:
     with runs.lock(ctx.run_id):
         run = runs.get(ctx.run_id)
         run.research["finished"] = {**a.model_dump(), "accepted_findings": accepted, "at": now()}
-        run.research["final_state"] = "Partial"
+        run.research["final_state"] = "Partial"  # until the report is rendered
         runs.set_state(run, "Writing")
-        # The Writer arrives on day 5 (DESIGN.md §13); until then a finished run ends Partial.
-        runs.set_state(run, "Partial", "the report writer is not built yet")
         runs.save(run)
     raise Finished(a.summary)
 
@@ -403,10 +403,22 @@ async def chat(run_id: str, message: str) -> tuple[str, list[dict]]:
     return reply, trace.since(run_id, start)
 
 
+async def _report(run_id: str, summary: str) -> str:
+    """Research is finished: write the report, then answer with the Lead's summary."""
+    state = await pipeline.build(run_id)
+    run = runs.get(run_id)
+    if state == "Complete":
+        return summary
+    reason = run.state_history[-1].get("detail", "")
+    return f"{summary}\n\nThe report is incomplete: {reason}." if reason else summary
+
+
 async def _turn(run_id: str, message: str) -> str:
     run = runs.get(run_id)
     if run.state == "Interrupted":
         run = _set_state(run_id, resume_state(run))
+    if run.state in pipeline.STATES:  # research finished, but the report was cut off
+        return await _report(run_id, run.research["finished"]["summary"])
     messages = runs.load_lead(run_id)
     if not messages:
         messages.append({"role": "system", "content": [{"type": "text", "text": PROMPT,
@@ -470,7 +482,7 @@ async def _turn(run_id: str, message: str) -> str:
         runs.save_lead(run_id, messages)
         trace.flush(run_id)
         if summary is not None:
-            return summary
+            return await _report(run_id, summary)
 
 
 def _end_turn(run_id: str, p: str, text: str) -> str:

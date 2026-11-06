@@ -92,9 +92,10 @@ async def complete(
         cost_usd=cost,
         seconds=seconds,
     )
-    log.info("%s call to %s: %d in / %d out tokens, $%s, %.1fs, finish=%s", role, config.model,
-             result.input_tokens, result.output_tokens, f"{cost:.4f}" if cost is not None else "?",
-             seconds, result.finish_reason)
+    log.info("%s call to %s: %d in (%d cache read, %d cache written) / %d out tokens, $%s, %.1fs, finish=%s",
+             role, config.model, result.input_tokens, getattr(usage, "cache_read_input_tokens", 0) or 0,
+             getattr(usage, "cache_creation_input_tokens", 0) or 0, result.output_tokens,
+             f"{cost:.4f}" if cost is not None else "?", seconds, result.finish_reason)
 
     if result.finish_reason not in NORMAL_FINISH:
         raise ModelCallError(f"{role} call ended with finish_reason={result.finish_reason!r}")

@@ -34,6 +34,20 @@ def store(tmp_path, monkeypatch):
     return s
 
 
+@pytest.fixture(autouse=True)
+def no_report(monkeypatch):
+    """The Lead's tests stop where the report starts; the report has its own tests (test_report.py)."""
+    async def build(run_id):
+        with runs.lock(run_id):
+            run = runs.get(run_id)
+            run.research["final_state"] = "Complete"
+            runs.set_state(run, "Complete")
+            runs.save(run)
+        return "Complete"
+
+    monkeypatch.setattr(lead.pipeline, "build", build)
+
+
 def make_run(*, brief: bool = True, confirmed: bool = True) -> runs.Run:
     run = runs.Run(id="00000000-0000-4000-8000-000000000001", state="ReviewingSections")
     for tid, sections in SECTIONS.items():
@@ -218,11 +232,11 @@ def test_a_research_run_fans_out_in_parallel_then_follows_up_and_finishes(store,
     assert k0 < l1 and l0 < k1, "the first round's researchers overlap"
     assert (r1, r2) == (1, 2)
     run = runs.get(run.id)
-    assert run.state == "Partial" and run.research["rounds_used"] == 2
+    assert run.state == "Complete" and run.research["rounds_used"] == 2
     assert set(run.research["finished"]["accepted_findings"]) == set(refs(run, "low_end"))
     tools = [e for e in events if e["kind"] == "llm_tool_call"]
     assert [e["round"] for e in tools] == [1, 1, 2, None]
-    assert {"Researching", "Writing", "Partial"} <= {h["state"] for h in run.state_history}
+    assert {"Researching", "Writing", "Complete"} <= {h["state"] for h in run.state_history}
     # The first message carries the overview; every message the status block.
     first = script.seen[0][1]["content"]
     assert "[Run status] Phase: research." in first and "[Run overview]" in first
@@ -311,7 +325,7 @@ def test_an_interrupted_run_resumes_with_its_dangling_calls_answered(store, monk
     assert reply == "Resumed."
     assert [m["role"] for m in sent[-3:]] == ["tool", "tool", "user"]
     assert sent[-2] == {"role": "tool", "tool_call_id": "call_run_researcher_2", "content": lead.INTERRUPTED}
-    assert runs.get(run.id).state == "Partial"
+    assert runs.get(run.id).state == "Complete"
 
 
 def test_editing_sections_after_research_archives_the_findings(store):

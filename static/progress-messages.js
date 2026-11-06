@@ -41,4 +41,15 @@ export const PROGRESS_MESSAGES = {
     "Deciding what matters most for your goals",
     "Double-checking a suspicious number",
   ],
+  writer: [
+    "Writing it up like session notes",
+    "Picking the graph that shows it best",
+    "Checking every number against the meters",
+    "Leaving out what nobody measured",
+  ],
+  humanizer: [
+    "Taking the robot out of the prose",
+    "Cutting the words nobody says in a studio",
+    "Reading it back out loud",
+  ],
 };

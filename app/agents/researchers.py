@@ -213,8 +213,9 @@ def _decimals(x: float) -> int:
 
 
 def _close(quoted: float, measured: float) -> bool:
-    """Equal after rounding to the quoted precision; the sign may be dropped ("3 dB quieter")."""
-    tol = 0.5 * 10 ** -_decimals(quoted) + 1e-9
+    """Equal after rounding to the quoted precision; the sign may be dropped ("3 dB quieter"). Rounding twice
+    is allowed: -29.649 shown as -29.65 and then said as -29.7."""
+    tol = 0.55 * 10 ** -_decimals(quoted) + 1e-9
     return abs(quoted - measured) <= tol or abs(abs(quoted) - abs(measured)) <= tol
 
 

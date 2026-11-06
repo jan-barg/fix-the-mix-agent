@@ -48,6 +48,9 @@ class Settings:
     max_research_rounds: int = 3
     max_lead_turns: int = 12
 
+    # The Humanizer edits the report's prose after the Writer (DESIGN.md §7.6). HUMANIZER=off skips it.
+    humanizer: bool = _env("HUMANIZER", "on") != "off"
+
     # Bump when any analysis setting changes; it is part of every cache key.
     config_version: str = "2026-11-05.7"
 
@@ -57,7 +60,8 @@ settings = Settings()
 ROLES: dict[str, RoleConfig] = {
     "lead": RoleConfig(_env("LEAD_MODEL", DEFAULT_MODEL), "high"),
     "researcher": RoleConfig(_env("RESEARCHER_MODEL", RESEARCHER_MODEL), "medium"),
-    "writer": RoleConfig(_env("WRITER_MODEL", DEFAULT_MODEL), "high"),
+    # Medium: at high effort the Writer thought for 29k tokens (4 min, $0.80) on a three-priority report.
+    "writer": RoleConfig(_env("WRITER_MODEL", DEFAULT_MODEL), "medium"),
     "humanizer": RoleConfig(_env("HUMANIZER_MODEL", DEFAULT_MODEL), "medium"),
     # README baselines: same model as the Lead, no tools, no system prompt, default effort.
     "baseline": RoleConfig(_env("BASELINE_MODEL", _env("LEAD_MODEL", DEFAULT_MODEL)), None),

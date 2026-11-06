@@ -8,7 +8,7 @@ import numpy as np
 
 from app import evidence
 from app.audio import bands, figures, kick, loudness, lowend, stereo, tonal
-from app.audio.features import Scope, TrackData, whole_track
+from app.audio.features import Scope, TrackData, clock, clock_events, whole_track
 from app.evidence import Evidence, scalar
 
 NORMALISATION = "each track normalised once to 0 dBFS sample peak (one gain for all channels)"
@@ -109,9 +109,9 @@ def measure_loudness(scopes: list[Scope]) -> Evidence:
     desc = evidence.describe_scopes(scopes)
     figs = [
         evidence.figure("Loudness over time", f"Source: short-term loudness of {desc}.",
-                        figures.loudness_timeline(series, "Loudness over time", _section_shading(scopes))),
+                        figures.loudness_timeline(series, _section_shading(scopes))),
         evidence.figure("Loudness and peaks at equal sample peak", f"Source: loudness and peak comparison of {desc}.",
-                        figures.loudness_comparison(rows, "Loudness and peaks at equal sample peak")),
+                        figures.loudness_comparison(rows)),
     ]
     method = {"meter": "EBU R128 / ITU-R BS.1770 via FFmpeg ebur128 (100 ms steps)",
               "section integrated loudness": "BS.1770 gating over the 400 ms blocks that lie wholly inside the section",
@@ -157,7 +157,7 @@ def measure_tonal_balance(scopes: list[Scope], mode: str = "peak_normalised",
     desc = " vs ".join(c.label for c in curves)
     fig = figures.tonal_curves(
         [{"track_id": c.track_id, "label": c.label, "centres": c.bands.centres, "level_db": c.level_db} for c in curves],
-        title, note=notes[0] if mode == "level_matched" else "")
+        note=notes[0] if mode == "level_matched" else "")
     method = {"spectrum": "power-averaged 1/6-octave long-term spectrum of (|L|²+|R|²)/2, Hann, n_fft 16384, hop 4096",
               "level": "dB re full-scale mean square (a full-scale sine reads -3 dB)",
               "summary bands": {k: f"{lo:g}-{hi:g} Hz" for k, (lo, hi) in bands.TONAL_SUMMARY_BANDS.items()},
@@ -196,11 +196,10 @@ def measure_stereo(scopes: list[Scope]) -> Evidence:
         figs.append(evidence.figure("Stereo width and mono change by frequency", f"Source: stereo comparison of {desc}.",
                                     figures.stereo_by_frequency([{"track_id": r.track_id, "label": r.label, "centres": r.bands.centres,
                                                                   "side_to_mid_db": r.side_to_mid_db, "mono_change_db": r.mono_change_db}
-                                                                 for r in results], "Stereo width and mono change by frequency")))
+                                                                 for r in results])))
         figs.append(evidence.figure("L/R correlation over time", f"Source: L/R correlation of {desc}.",
                                     figures.correlation_timeline([{"track_id": r.track_id, "label": r.label, "times_s": r.window_times_s,
-                                                                   "correlation": r.window_correlation} for r in results],
-                                                                 "L/R correlation over time")))
+                                                                   "correlation": r.window_correlation} for r in results])))
     method = {"mid/side": "mid = (L+R)/2, side = (L-R)/2", "mono change": "mid power vs average channel power, per band",
               "bands": "1/3 octave", "correlation window": "400 ms", "normalisation": NORMALISATION + "; mono fold-down not renormalised"}
     status = "unavailable" if not results else None
@@ -230,10 +229,9 @@ def find_kick_candidates(track: TrackData, ranges: list[tuple[float, float]] | N
         analyses = [kick.analyse(track, c.time_s, c.time_s + c.gap_s) for c in candidates]
         figs.append(evidence.figure(
             f"{track.name}: kick candidates", f"Source: the top kick candidates found in {track.name}.",
-            figures.kick_spectrograms([{"track_id": track.id, "label": f"Candidate {i} at {c.time_s:.2f} s",
+            figures.kick_spectrograms([{"track_id": track.id, "label": f"Candidate {i} at {clock(c.time_s)}",
                                         "crop": a.crop, "sample_rate": a.sample_rate}
-                                       for i, (c, a) in enumerate(zip(candidates, analyses), 1)],
-                                      f"{track.name}: kick candidates")))
+                                       for i, (c, a) in enumerate(zip(candidates, analyses), 1)])))
     method = {"onsets": "kick-weighted onset envelope (mel bands below 250 Hz)",
               "ranking": "fullness (body peak vs the track's 95th percentile) first, then isolation from preceding "
                          "low end, inspectable decay and 8-16 kHz contamination; candidates at least 4 s apart",
@@ -262,13 +260,13 @@ def analyse_kicks(selections: list[tuple[TrackData, float, float | None]]) -> Ev
             notes.append(f"{d}: {a.decay_note}")
         notes.append(f"{d}: {a.pitch_note}")
     desc = evidence.describe_scopes(scopes)
-    kicks = [{"track_id": t.id, "label": s.describe(), "envelope_ms": a.envelope_ms, "envelope_db": a.envelope_db,
+    kicks = [{"track_id": t.id, "label": clock_events(s.describe()), "envelope_ms": a.envelope_ms, "envelope_db": a.envelope_db,
               "crop": a.crop, "sample_rate": a.sample_rate} for (t, a), s in zip(analyses, scopes)]
     figs = [
         evidence.figure("Kick body envelopes", f"Source: kick envelope comparison of {desc}.",
-                        figures.kick_envelopes(kicks, "Kick body envelopes")),
+                        figures.kick_envelopes(kicks)),
         evidence.figure("Kick spectrograms", f"Source: kick spectrogram comparison of {desc}.",
-                        figures.kick_spectrograms(kicks, "Kick spectrograms (shared colour scale)")),
+                        figures.kick_spectrograms(kicks)),
     ]
     method = {"crop": "10 ms before to 400 ms after the onset, mid signal, parent-track normalisation",
               "attack-to-body": "2-8 kHz mean square over 0-15 ms vs 40-120 Hz over 15-150 ms",
@@ -318,11 +316,10 @@ def measure_low_end(scopes: list[Scope], band_names: list[str] | None = None) ->
     figs = [
         evidence.figure("Low-end level", f"Source: low-end comparison of {desc}.",
                         figures.low_end_distribution([{"track_id": r.track_id, "label": r.label, "centres": r.distribution_bands.centres,
-                                                       "level_db": r.distribution_db} for r in results], "Low-end level")),
+                                                       "level_db": r.distribution_db} for r in results])),
         evidence.figure("Low end around the kick", f"Source: kick-aligned low-end envelopes of {desc}.",
                         figures.recovery_envelopes([{"track_id": r.track_id, "label": r.label, "bpm": r.bpm,
-                                                     "recoveries": r.recoveries} for r in results], band_names,
-                                                   "Low end around the kick")),
+                                                     "recoveries": r.recoveries} for r in results], band_names)),
     ]
     first = scopes[0]
     passage = min(first.duration_s, 4 * 4 * first.track.features.grid.beat_s)
@@ -334,7 +331,7 @@ def measure_low_end(scopes: list[Scope], band_names: list[str] | None = None) ->
                        "sample_rate": s.track.audio.sample_rate, "start_s": start})
     markers = {r.track_id: [t for t in r.events_s if s.start_s <= t < s.start_s + passage] for s, r in zip(scopes, results)}
     figs.append(evidence.figure("Low-end spectrogram", f"Source: low-end spectrogram of {desc}.",
-                                figures.spectrograms(panels, "low_detail", "Low-end spectrogram (kick onsets marked)", markers=markers)))
+                                figures.spectrograms(panels, "low_detail", markers=markers)))
     method = {"bands": {k: f"{lo:g}-{hi:g} Hz" for k, (lo, hi) in bands.LOW_END_BANDS.items()},
               "envelope": "zero-phase 4th-order Butterworth band-pass, analytic (Hilbert) envelope averaged over "
                           "one period of the band's lowest frequency (at least 10 ms), every 5 ms",
@@ -353,7 +350,7 @@ def render_spectrogram(scopes: list[Scope], preset: str = "overview", fmin: floa
                "sample_rate": s.track.audio.sample_rate, "start_s": s.start_s} for s in scopes]
     p = figures.SPECTROGRAM_PRESETS[preset]
     title = f"Spectrogram ({preset.replace('_', ' ')})"
-    fig = figures.spectrograms(panels, preset, title, fmin, fmax)
+    fig = figures.spectrograms(panels, preset, fmin, fmax)
     method = {"preset": preset, "n_fft": p["n_fft"], "hop": p["hop"], "window": "Hann", "scale": "dB, one shared range",
               "signal": "mid (L+R)/2", "normalisation": NORMALISATION}
     return evidence.make("render_spectrogram", scopes, method, {"scalars": {}}, [

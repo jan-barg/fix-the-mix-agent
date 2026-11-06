@@ -342,6 +342,35 @@ def figure(run_id: str, figure_id: str):
     return Response(storage.read(path), media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
 
 
+# --- Report ---
+
+
+def _report_file(run_id: str, key: str) -> bytes:
+    report = _run(run_id).report or {}
+    path = report.get(key)
+    storage = get_storage()
+    if not path or not storage.exists(path):
+        detail = report.get("pdf_error") if key == "pdf_path" else None
+        raise HTTPException(404, f"The PDF could not be rendered ({detail})." if detail else "There is no report yet.")
+    return storage.read(path)
+
+
+@router.get("/runs/{run_id}/report")
+def report_html(run_id: str):
+    return Response(_report_file(run_id, "html_path"), media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store"})
+
+
+@router.get("/runs/{run_id}/report.pdf")
+def report_pdf(run_id: str):
+    run = _run(run_id)
+    user = run.track("user")
+    name = re.sub(r"[^\w.-]+", "-", Path(user.filename).stem if user else "track").strip("-") or "track"
+    return Response(_report_file(run_id, "pdf_path"), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="fix-the-mix-{name}.pdf"',
+                             "Cache-Control": "no-store"})
+
+
 # --- Demo ---
 
 

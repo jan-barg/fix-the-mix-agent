@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}: {{ track_title }}</title>
+{% if not pdf %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+{% endif %}
+<style>
+/* One dark, studio-style look shared with the app (static/styles.css) and the charts (app/audio/figures.py). */
+:root {
+  --bg: #0b0d10; --raised: #111419; --panel: #161a20; --panel-2: #1c2129;
+  --line: #262c35; --line-strong: #353c47;
+  --text: #eceef1; --text-2: #b6bdc6; --muted: #7d8692;
+  --accent: #ff5a6a; --accent-soft: rgba(255, 90, 106, 0.12); --ok: #43d18a; --warn: #f2b134;
+  --t-user: #ef5b6b; --t-ref1: #3fa7d6; --t-ref2: #4cc27a; --t-ref3: #a98be0;
+  --font: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html { color-scheme: dark; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.65 var(--font);
+  -webkit-font-smoothing: antialiased; font-feature-settings: "cv11", "ss01"; }
+.report { max-width: 880px; margin: 0 auto; padding: 56px 32px 72px; }
+p { margin: 0 0 14px; }
+a { color: inherit; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--accent); }
+
+.kicker { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 8px; }
+h1, h2, h3 { margin: 0; letter-spacing: -0.02em; }
+h2 { font-size: 25px; line-height: 1.2; font-weight: 650; margin-bottom: 18px; }
+h3 { font-size: 18px; line-height: 1.3; font-weight: 600; }
+section { margin-top: 64px; }
+
+/* Masthead */
+.brand { font-weight: 700; font-size: 14px; line-height: 16px; letter-spacing: -0.01em; color: var(--text-2); white-space: nowrap; }
+.mark { display: inline-block; height: 16px; margin-right: 10px; vertical-align: -3px; }
+.mark i { display: inline-block; width: 3px; margin-right: 2px; border-radius: 2px; background: var(--accent); vertical-align: middle; }
+.mark i:nth-child(1) { height: 7px; } .mark i:nth-child(2) { height: 14px; } .mark i:nth-child(3) { height: 10px; }
+.mark i:nth-child(4) { height: 16px; } .mark i:nth-child(5) { height: 6px; }
+.masthead { padding-bottom: 36px; border-bottom: 1px solid var(--line); }
+.masthead h1 { font-size: 46px; line-height: 1.04; font-weight: 700; letter-spacing: -0.035em; margin: 28px 0 10px; }
+.dek { color: var(--muted); font-size: 14px; margin: 0 0 28px; }
+.tracks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.track { background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px 12px 16px;
+  position: relative; overflow: hidden; }
+.track::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); }
+.track .name { font-weight: 600; font-size: 14px; display: flex; align-items: baseline; gap: 8px; }
+.track .meta { color: var(--muted); font: 12px/1.5 var(--mono); }
+.track .file { color: var(--text-2); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track .role { color: var(--text-2); font-size: 12.5px; margin-top: 6px; }
+.t-user { --c: var(--t-user); } .t-ref1 { --c: var(--t-ref1); } .t-ref2 { --c: var(--t-ref2); } .t-ref3 { --c: var(--t-ref3); }
+
+/* Brief and overview */
+.brief { display: grid; grid-template-columns: 180px 1fr; gap: 8px 28px; margin-top: 36px; }
+.brief .label { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+  padding-top: 3px; }
+.brief ul { margin: 0; padding: 0; list-style: none; }
+.brief li { padding: 2px 0 2px 18px; position: relative; color: var(--text-2); }
+.brief li::before { content: ""; position: absolute; left: 0; top: 12px; width: 8px; height: 1.5px; background: var(--accent); }
+.brief .value { color: var(--text-2); }
+.lede { font-size: 19px; line-height: 1.6; color: var(--text); letter-spacing: -0.005em; margin: 40px 0 0; }
+
+/* Priorities */
+.priority { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 0 8px; background: var(--raised);
+  border: 1px solid var(--line); border-radius: 16px; padding: 28px 28px 22px 20px; margin-bottom: 16px; }
+.priority .num { font: 600 30px/1 var(--mono); color: var(--accent); letter-spacing: -0.04em; padding-top: 2px; }
+.priority h3 { font-size: 21px; margin-bottom: 8px; }
+.priority .why { color: var(--text-2); margin-bottom: 18px; }
+.rows { margin: 0; display: grid; grid-template-columns: 140px minmax(0, 1fr); border-top: 1px solid var(--line); }
+.rows dt, .rows dd { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.rows dt { padding-right: 14px; }
+.rows dt { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+  padding-top: 15px; }
+.rows dd { color: var(--text); }
+.rows dt.try { color: var(--ok); }
+.priority .fig { margin-top: 20px; }
+
+/* Keep */
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { position: relative; padding: 14px 0 14px 34px; border-bottom: 1px solid var(--line); color: var(--text-2); }
+.checks li:last-child { border-bottom: 0; }
+.checks li::before { content: ""; position: absolute; left: 2px; top: 19px; width: 16px; height: 16px; border-radius: 50%;
+  background: rgba(67, 209, 138, 0.14); box-shadow: inset 0 0 0 1px rgba(67, 209, 138, 0.5); }
+.checks li::after { content: ""; position: absolute; left: 7px; top: 23px; width: 4px; height: 7px;
+  border: solid var(--ok); border-width: 0 1.6px 1.6px 0; transform: rotate(45deg); }
+
+/* Topics */
+.topic p { color: var(--text-2); }
+.topic p:first-of-type { color: var(--text); }
+
+/* Figures */
+.fig { margin: 24px 0 28px; background: var(--raised); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.fig img { display: block; width: 100%; height: auto; }
+.fig figcaption { padding: 12px 18px 14px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.55; color: var(--muted); }
+.fig .fig-title { color: var(--text); font-weight: 600; font-size: 13.5px; }
+.fig .fig-tool { float: right; font: 11px/2 var(--mono); color: var(--muted); }
+.fig details { margin-top: 6px; }
+.fig summary { cursor: pointer; color: var(--text-2); font-size: 12px; list-style: none; }
+.fig summary::-webkit-details-marker { display: none; }
+.fig summary::before { content: "+ "; color: var(--accent); }
+.fig details[open] summary::before { content: "− "; }
+.fig .passages { margin: 6px 0 0; padding: 0; list-style: none; font: 12px/1.7 var(--mono); color: var(--text-2); }
+.fig .reliability { display: block; color: var(--warn); font-size: 12px; margin-top: 4px; }
+.fig .warnings { margin: 8px 0 0; padding-left: 16px; font-size: 12px; line-height: 1.55; color: var(--text-2); }
+.fig .warnings li { margin-bottom: 4px; }
+
+/* Method and sources */
+.method p { color: var(--text-2); }
+.settings { margin: 22px 0 8px; display: grid; grid-template-columns: 180px minmax(0, 1fr); border-top: 1px solid var(--line); }
+.settings div { padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.settings .k { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding-top: 14px; }
+.settings .v { color: var(--text-2); }
+.method h3 { margin: 40px 0 12px; }
+.sources { margin: 0; padding: 0; list-style: none; counter-reset: src; }
+.sources li { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; color: var(--muted); }
+.sources li a { color: var(--text); font-weight: 500; }
+.sources .passages { display: block; font: 11.5px/1.6 var(--mono); color: var(--muted); margin-top: 2px; }
+.limits li { color: var(--text-2); }
+.limits { padding-left: 18px; margin: 0; }
+.limits li { margin-bottom: 10px; }
+
+footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+footer p { margin: 0 0 6px; }
+
+@media (max-width: 640px) {
+  .report { padding: 32px 16px 48px; }
+  .masthead h1 { font-size: 34px; }
+  .tracks { grid-template-columns: minmax(0, 1fr); }
+  .brief, .settings { grid-template-columns: minmax(0, 1fr); }
+  .brief .label { padding-top: 14px; }
+  .priority { grid-template-columns: minmax(0, 1fr); padding: 22px 18px 16px; }
+  .priority .num { margin-bottom: 12px; }
+  .rows { grid-template-columns: minmax(0, 1fr); }
+  .rows dt { border-bottom: 0; padding-bottom: 0; }
+}
+
+{% if pdf %}
+@page { size: A4; margin: 15mm 15mm 17mm; background: #0b0d10;
+  @bottom-left { content: "Fix the Mix  ·  {{ track_title }}"; font: 8pt var(--font); color: #7d8692; }
+  @bottom-right { content: counter(page) " / " counter(pages); font: 8pt var(--font); color: #7d8692; } }
+body { font-size: 10pt; line-height: 1.55; background: #0b0d10; }
+.report { max-width: none; padding: 0; }
+section { margin-top: 30pt; }
+h2 { font-size: 17pt; break-after: avoid; }
+.masthead h1 { font-size: 30pt; margin-top: 16pt; }
+.lede { font-size: 12.5pt; }
+.fig, .track, .settings div, .sources li, .rows dd, .priority h3, .priority .why { break-inside: avoid; }
+.rows dt, .priority .num { break-after: avoid; }
+.priority { padding: 16pt 16pt 10pt 12pt; grid-template-columns: 44pt minmax(0, 1fr); }
+.priority .num { font-size: 20pt; }
+.priority h3 { font-size: 13.5pt; }
+.rows { grid-template-columns: 92pt minmax(0, 1fr); }
+.rows dt, .rows dd { padding: 7pt 0; }
+.rows dt { padding-top: 9pt; font-size: 7pt; }
+.fig { margin: 12pt 0 16pt; }
+.fig figcaption { font-size: 8.5pt; padding: 8pt 12pt; }
+.fig .fig-title { font-size: 9pt; }
+.brief { grid-template-columns: 120pt 1fr; margin-top: 20pt; }
+.settings { grid-template-columns: 120pt minmax(0, 1fr); }
+.settings div { font-size: 9pt; padding: 7pt 0; }
+.sources li { font-size: 8.5pt; padding: 6pt 0; }
+{% endif %}
+</style>
+</head>
+<body>
+{% macro figure(f) -%}
+<figure class="fig" id="{{ f.id }}">
+  <img src="{{ f.src }}" alt="{{ f.title }}. {{ f.caption }}">
+  <figcaption>
+    <span class="fig-tool">{{ f.tool }}</span>
+    <span class="fig-title">{{ f.title }}</span><br>
+    Source: {{ f.caption }}
+    {% if f.warnings %}<span class="reliability">Some values here could not be measured reliably{{ "; see the source details" if not pdf }}.</span>{% endif %}
+    {% if pdf %}
+    <ul class="passages">{% for p in f.passages %}<li>{{ p }}</li>{% endfor %}</ul>
+    {% else %}
+    <details><summary>Source details</summary>
+      <ul class="passages">{% for p in f.passages %}<li>{{ p }}</li>{% endfor %}</ul>
+      {% if f.warnings %}<ul class="warnings">{% for w in f.warnings %}<li>{{ w }}</li>{% endfor %}</ul>{% endif %}
+    </details>
+    {% endif %}
+  </figcaption>
+</figure>
+{%- endmacro %}
+{% macro paras(items) -%}
+{% for p in items %}<p>{{ p.text }}</p>{% for f in p.figures %}{{ figure(f) }}{% endfor %}{% endfor %}
+{%- endmacro %}
+
+<article class="report">
+  <header class="masthead">
+    <div class="brand"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>Fix the Mix</div>
+    <h1>{{ track_title }}</h1>
+    <p class="dek">{{ title }} · {{ date }} · {{ stage }} compared with {{ tracks | length - 1 }} reference{{ "s" if tracks | length > 2 }}</p>
+    <ul class="tracks">
+      {% for t in tracks %}
+      <li class="track t-{{ t.id }}">
+        <div class="name">{{ t.name }} <span class="meta">{{ t.bpm }} BPM · {{ t.duration }}</span></div>
+        <div class="file">{{ t.file }}</div>
+        {% if t.aspects %}<div class="role">For {{ t.aspects }}{% if t.exclusions %}; not for {{ t.exclusions }}{% endif %}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </header>
+
+  <div class="brief">
+    <div class="label">You asked for</div>
+    <ul>{% for g in goals %}<li>{{ g }}</li>{% else %}<li>A general comparison with your references</li>{% endfor %}</ul>
+    {% if keep_goals %}<div class="label">Keep</div><ul>{% for k in keep_goals %}<li>{{ k }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+
+  {% for p in overview %}<p class="lede">{{ p.text }}</p>{% for f in p.figures %}{{ figure(f) }}{% endfor %}{% endfor %}
+
+  {% if priorities %}
+  <section class="priorities">
+    <h2><span class="kicker">Priorities</span>What to work on first</h2>
+    {% for p in priorities %}
+    <div class="priority">
+      <div class="num">{{ "%02d" % p.n }}</div>
+      <div>
+        <h3>{{ p.title }}</h3>
+        <p class="why">{{ p.why }}</p>
+        <dl class="rows">
+          {% for label, text in p.rows %}<dt{% if label == "Try" %} class="try"{% endif %}>{{ label }}</dt><dd>{{ text }}</dd>{% endfor %}
+        </dl>
+        {% for f in p.figures %}{{ figure(f) }}{% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if preserve %}
+  <section class="keep">
+    <h2><span class="kicker">Keep</span>What already works</h2>
+    <ul class="checks">{% for p in preserve %}<li>{{ p.text }}</li>{% endfor %}</ul>
+    {% for p in preserve %}{% for f in p.figures %}{{ figure(f) }}{% endfor %}{% endfor %}
+  </section>
+  {% endif %}
+
+  {% for s in sections %}{% if s.paras %}
+  <section class="topic" id="{{ s.key }}">
+    <h2><span class="kicker">{{ s.kicker }}</span>{{ s.title }}</h2>
+    {{ paras(s.paras) }}
+  </section>
+  {% endif %}{% endfor %}
+
+  <section class="method">
+    <h2><span class="kicker">How this was measured</span>Method and sources</h2>
+    {{ paras(method) }}
+    <div class="settings">
+      <div class="k">Level</div><div class="v">Each track normalised once to 0 dBFS sample peak, one gain for the whole song. Levels compare the tracks at equal peak, and every section keeps its level relative to its own song.</div>
+      <div class="k">Comparison</div><div class="v">{{ mode | capitalize }}{% if combined %}: {{ combined.method }}{% endif %}.</div>
+      {% if pairs %}<div class="k">Matched sections</div><div class="v">{% for p in pairs %}Your {{ p.user }}: {{ p.refs or "no match" }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+      <div class="k">Stage</div><div class="v">{{ stage }}</div>
+    </div>
+    {% if limitations %}
+    <h3>Limitations</h3>
+    <ul class="limits">{% for p in limitations %}<li>{{ p.text }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if sources %}
+    <h3>Sources</h3>
+    <ol class="sources">
+      {% for f in sources %}<li><a href="#{{ f.id }}">{{ f.title }}</a>: {{ f.caption }}<span class="passages">{{ f.passages | join(" · ") }}</span></li>{% endfor %}
+    </ol>
+    {% endif %}
+  </section>
+
+  <footer>
+    {% if checks %}<p>{{ checks }}</p>{% endif %}
+    {% if humanizer %}<p>{{ humanizer }}</p>{% endif %}
+    <p>Written by Fix the Mix from measurements of the uploaded audio. Numbers are measured; causes are hypotheses to test by ear.</p>
+  </footer>
+</article>
+</body>
+</html>

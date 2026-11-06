@@ -391,6 +391,7 @@ async function pollOnce() {
 let funTimer = null, funPool = [];
 function funFor(running) {
   const keys = running.filter((e) => e.name.startsWith("researcher:")).map((e) => e.name.split(":")[1]);
+  for (const agent of ["writer", "humanizer"]) if (running.some((e) => e.agent === agent)) keys.push(agent);
   if (!keys.length && running.some((e) => e.agent === "lead" && e.kind === "model_call")) keys.push("lead");
   const pool = (keys.length ? keys : ["general"]).flatMap((k) => PROGRESS_MESSAGES[k] || []);
   if (!running.length) { clearInterval(funTimer); funTimer = null; $("#fun").textContent = ""; return; }
@@ -465,12 +466,16 @@ function renderTrace(el, events) {
 // Show the view that matches where the run is.
 async function route(run) {
   const confirmed = run.tracks.length && run.tracks.every((t) => run.section_maps[t.id].at(-1).confirmed);
-  if (run.research?.finished) return showResults(run);
+  if (run.research?.finished && !WORKING.includes(run.state) && run.state !== "Interrupted") return showResults(run);
   if (run.state === "Interrupted") {
     show("analysis");
     await pollOnce().catch(() => {});
     return notice("The analysis was interrupted, most likely by a server restart. It can continue where it stopped.",
       "Continue", () => startAnalysis("Continue."));
+  }
+  if (WORKING.includes(run.state) && run.research?.finished) {  // the report is being written by a running request
+    show("analysis");
+    return watch();
   }
   if (WORKING.includes(run.state) || (confirmed && run.brief)) {
     show("analysis");
@@ -484,7 +489,7 @@ async function route(run) {
   show("upload");
 }
 
-// --- Results (day 4: the Lead's accepted findings; the written report comes with the Writer) ---
+// --- Results: the written report, or the Lead's accepted findings when there is none ---
 function findingHtml(f) {
   if (f.kind === "observation") {
     const values = f.values.map((v) => `<span class="val mono" title="${esc(v.name)}">${esc(v.value)} ${esc(v.unit)}</span>`).join("");
@@ -512,7 +517,57 @@ function figuresFor(run, taskIds) {
 }
 
 async function showResults(run) {
+  const report = run.report?.status === "ready" ? run.report : null;
+  $("#report-bar").hidden = $("#report-frame").hidden = !report;
+  $("#findings-view").hidden = !!report;
+  if (report) showReport(run, report);
+  else showFindings(run);
+  renderChat(run);
+  $("#res-usage").textContent = `${run.usage.calls} model calls · $${run.usage.cost_usd.toFixed(2)}`;
+  show("results");
+  state.next = 0;
+  state.events = [];
+  const p = await api(`/api/runs/${state.runId}/progress?since=0`);
+  state.events = p.events;
+  state.next = p.next;
+  renderTrace($("#trace-results"), state.events);
+}
+
+// The report is its own page (the same HTML as the PDF), shown in a frame sized to its content.
+function showReport(run, report) {
+  const base = `/api/runs/${state.runId}`;
+  const lost = run.state === "Partial" ? run.state_history.at(-1)?.detail : "";
+  $("#report-status").textContent = lost ? `Incomplete: ${lost}.` : "Every number in it was checked against the measurements.";
+  $("#report-status").classList.toggle("warn", !!lost);
+  $("#report-open").href = `${base}/report`;
+  $("#report-pdf").href = `${base}/report.pdf`;
+  $("#report-pdf").hidden = !report.pdf_path;
+  const frame = $("#report-frame");
+  const src = `${base}/report?at=${encodeURIComponent(report.at || "")}`;
+  if (frame.dataset.src === src) return;
+  frame.dataset.src = src;
+  frame.onload = () => {
+    const doc = frame.contentDocument;
+    const fit = () => { frame.style.height = `${doc.documentElement.scrollHeight}px`; };
+    fit();
+    new frame.contentWindow.ResizeObserver(fit).observe(doc.body);
+    // In-page links (a source to its figure) scroll this page, since the frame never scrolls itself.
+    doc.addEventListener("click", (e) => {
+      const a = e.target.closest('a[href^="#"]');
+      const el = a && doc.getElementById(a.getAttribute("href").slice(1));
+      if (!el) return;
+      e.preventDefault();
+      window.scrollTo({ top: frame.getBoundingClientRect().top + window.scrollY + el.getBoundingClientRect().top - 90, behavior: "smooth" });
+    });
+  };
+  frame.src = src;
+}
+
+function showFindings(run) {
   const fin = run.research.finished, accepted = fin.accepted_findings || {};
+  $("#findings-note").textContent = run.report?.error
+    ? `The written report is not available (${run.report.error}). These are the findings the Lead accepted, with the measurements behind them.`
+    : "These are the findings the Lead accepted, with the measurements behind them.";
   $("#res-summary").textContent = fin.summary || "Research ended without firm conclusions.";
   $("#priorities").innerHTML = fin.priorities.map((p, i) => `
     <article class="priority">
@@ -531,15 +586,6 @@ async function showResults(run) {
       ${fs.map((f) => `<div class="finding">${findingHtml(f)}</div>`).join("")}
       <div class="figs">${figuresFor(run, [...new Set(fs.map((f) => f.task_id))])}</div>
     </section>`).join("");
-  renderChat(run);
-  $("#res-usage").textContent = `${run.usage.calls} model calls · $${run.usage.cost_usd.toFixed(2)}`;
-  show("results");
-  state.next = 0;
-  state.events = [];
-  const p = await api(`/api/runs/${state.runId}/progress?since=0`);
-  state.events = p.events;
-  state.next = p.next;
-  renderTrace($("#trace-results"), state.events);
 }
 
 function renderChat(run) {

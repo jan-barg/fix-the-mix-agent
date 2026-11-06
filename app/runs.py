@@ -85,6 +85,8 @@ class Run(BaseModel):
     evidence_by_key: dict[str, str] = Field(default_factory=dict)  # cache key -> evidence_id
     usage: dict = Field(default_factory=lambda: {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
     transcript: list[dict] = Field(default_factory=list)  # what the producer sees: {role, text, at}
+    # status, html_path, pdf_path, pdf_error, checks, humanizer (app/report/pipeline.py)
+    report: dict | None = None
 
     def track(self, track_id: str) -> TrackRecord | None:
         return next((t for t in self.tracks if t.id == track_id), None)
@@ -166,6 +168,7 @@ def archive_research(run: Run) -> bool:
         return False
     old = {k: v for k, v in r.items() if k != "stale"}
     run.research = {**fresh_research(), "stale": [*r.get("stale", []), old]}
+    run.report = None  # written from those findings
     return True
 
 
