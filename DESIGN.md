@@ -540,6 +540,7 @@ Track colours are fixed: your track plus References 1–3, with a distinct style
   - A follow-up question about low-end width against Reference 3 was answered from existing evidence in one Lead call ($0.18), and the run returned to `Partial`.
   - Still to check: a vague request triggering clarification on the real model, and the round cap on the real model.
 - **Report runs on the demo corpus** (November 6, `scripts/demo_research.py`, brief → research → report in-process): 231 s and $1.53 in all. The Writer took 54 s ($0.26) for 2 priorities and 19 paragraphs; 3 blocks failed the number check (two of them rounded twice, which the check now accepts), and the repair fixed all three in 15 s ($0.19). The Humanizer edited 3 blocks in 32 s ($0.12) with none reverted. The run found the oversized-chart bug of §10: the tonal researcher failed in all three rounds.
+- **Cloud Run** (November 6, revision fix-the-mix-00008-txd, the demo through the public API): `Complete` in 336 s and $1.55. Two rounds (four specialists, then kick and low end), 54 findings accepted and 12 rejected, no tool errors, 3 priorities. The Writer's first draft passed every check (80 s, $0.39); the Humanizer edited 4 blocks with none reverted (41 s, $0.15). The 12-page PDF (1.7 MB, Inter embedded) downloads from the report view. One layout bug: a priority card broke after its number, leaving "01" alone at the foot of page 1; the number, title and why are now one unbreakable header.
 - **Baselines:** `scripts/baselines.py` sends each README sample question to the Lead's model through LiteLLM with no tools and no system prompt, and stores the raw answers.
 
 ### Demo corpus
@@ -566,7 +567,7 @@ Roles and comments for the demo live in `demo/corpus.json` and can change withou
 | 2 | Fri Nov 6 | Base analysis, grid, all measurement tools, figures, evidence records, synthetic tests | Every tool produces sensible numbers and charts for all four demo tracks |
 | 3 | Sat Nov 7 | Upload view and endpoints, section proposal, section editor | A run goes from upload to confirmed maps in the browser |
 | 4 | Sun Nov 8 | Lead loop, tools, clarification, parallel researchers, round cap, trace, progress | A research run produces accepted findings with a follow-up round visible in the trace. **Done November 5** (§12) |
-| 5 | Mon Nov 9 | Writer, validation and repair, HTML report, PDF, chart and report visual design pass (§14), follow-up chat, full run on Cloud Run | The deployed app produces a report and PDF from the demo corpus. **Report pipeline, Humanizer and design pass done November 6** (§7.4-§7.6, §10); the Cloud Run run is next |
+| 5 | Mon Nov 9 | Writer, validation and repair, HTML report, PDF, chart and report visual design pass (§14), follow-up chat, full run on Cloud Run | The deployed app produces a report and PDF from the demo corpus. **Done November 6** on Cloud Run (§12) |
 | 6 | Tue Nov 10 | README (data loading, three sample queries with real answers, baselines), `submission.json`, polish | Submission-ready |
 | — | Wed Nov 11 | Buffer and submission | |
 

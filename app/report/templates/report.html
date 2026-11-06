@@ -66,8 +66,10 @@ section { margin-top: 64px; }
 .lede { font-size: 19px; line-height: 1.6; color: var(--text); letter-spacing: -0.005em; margin: 40px 0 0; }
 
 /* Priorities */
-.priority { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 0 8px; background: var(--raised);
-  border: 1px solid var(--line); border-radius: 16px; padding: 28px 28px 22px 20px; margin-bottom: 16px; }
+.priority { background: var(--raised); border: 1px solid var(--line); border-radius: 16px; padding: 28px 28px 22px 20px;
+  margin-bottom: 16px; }
+.priority .head { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 0 8px; }
+.priority .body { margin-left: 76px; }
 .priority .num { font: 600 30px/1 var(--mono); color: var(--accent); letter-spacing: -0.04em; padding-top: 2px; }
 .priority h3 { font-size: 21px; margin-bottom: 8px; }
 .priority .why { color: var(--text-2); margin-bottom: 18px; }
@@ -133,7 +135,9 @@ footer p { margin: 0 0 6px; }
   .tracks { grid-template-columns: minmax(0, 1fr); }
   .brief, .settings { grid-template-columns: minmax(0, 1fr); }
   .brief .label { padding-top: 14px; }
-  .priority { grid-template-columns: minmax(0, 1fr); padding: 22px 18px 16px; }
+  .priority { padding: 22px 18px 16px; }
+  .priority .head { grid-template-columns: minmax(0, 1fr); }
+  .priority .body { margin-left: 0; }
   .priority .num { margin-bottom: 12px; }
   .rows { grid-template-columns: minmax(0, 1fr); }
   .rows dt { border-bottom: 0; padding-bottom: 0; }
@@ -150,8 +154,11 @@ h2 { font-size: 17pt; break-after: avoid; }
 .masthead h1 { font-size: 30pt; margin-top: 16pt; }
 .lede { font-size: 12.5pt; }
 .fig, .track, .settings div, .sources li, .rows dd, .priority h3, .priority .why { break-inside: avoid; }
-.rows dt, .priority .num { break-after: avoid; }
-.priority { padding: 16pt 16pt 10pt 12pt; grid-template-columns: 44pt minmax(0, 1fr); }
+/* The number, title and why stay together: a card once broke after its number alone. */
+.priority .head { grid-template-columns: 44pt minmax(0, 1fr); break-inside: avoid; break-after: avoid; }
+.rows dt { break-after: avoid; }
+.priority { padding: 16pt 16pt 10pt 12pt; }
+.priority .body { margin-left: calc(44pt + 8px); }
 .priority .num { font-size: 20pt; }
 .priority h3 { font-size: 13.5pt; }
 .rows { grid-template-columns: 92pt minmax(0, 1fr); }
@@ -220,10 +227,14 @@ h2 { font-size: 17pt; break-after: avoid; }
     <h2><span class="kicker">Priorities</span>What to work on first</h2>
     {% for p in priorities %}
     <div class="priority">
-      <div class="num">{{ "%02d" % p.n }}</div>
-      <div>
-        <h3>{{ p.title }}</h3>
-        <p class="why">{{ p.why }}</p>
+      <div class="head">
+        <div class="num">{{ "%02d" % p.n }}</div>
+        <div>
+          <h3>{{ p.title }}</h3>
+          <p class="why">{{ p.why }}</p>
+        </div>
+      </div>
+      <div class="body">
         <dl class="rows">
           {% for label, text in p.rows %}<dt{% if label == "Try" %} class="try"{% endif %}>{{ label }}</dt><dd>{{ text }}</dd>{% endfor %}
         </dl>
