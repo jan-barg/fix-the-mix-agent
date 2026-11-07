@@ -1,0 +1,435 @@
+{
+ "note": "Section maps the producer made by hand in the editor, the answer key for scripts/section_lab (DESIGN.md §5.3, §12). Times in seconds. The demo tracks are in demo/audio; the other four are the producer's own releases, not in the repository.",
+ "tracks": [
+  {
+   "name": "scars-extended",
+   "file": "demo/audio/scars-extended.mp3",
+   "bpm": 134.0,
+   "sections": [
+    {
+     "label": "intro",
+     "start_s": 0.0,
+     "end_s": 42.619
+    },
+    {
+     "label": "verse",
+     "start_s": 42.619,
+     "end_s": 78.44
+    },
+    {
+     "label": "build",
+     "start_s": 78.44,
+     "end_s": 107.096
+    },
+    {
+     "label": "drop",
+     "start_s": 107.096,
+     "end_s": 135.753
+    },
+    {
+     "label": "bridge",
+     "start_s": 135.753,
+     "end_s": 150.081
+    },
+    {
+     "label": "verse",
+     "start_s": 150.081,
+     "end_s": 178.738
+    },
+    {
+     "label": "chorus",
+     "start_s": 178.738,
+     "end_s": 207.395
+    },
+    {
+     "label": "build",
+     "start_s": 207.395,
+     "end_s": 225.305
+    },
+    {
+     "label": "build",
+     "start_s": 225.305,
+     "end_s": 250.38
+    },
+    {
+     "label": "outro",
+     "start_s": 250.38,
+     "end_s": 295.523
+    }
+   ]
+  },
+  {
+   "name": "endless-light-radio-edit",
+   "file": "demo/audio/endless-light-radio-edit.mp3",
+   "bpm": 134.0,
+   "sections": [
+    {
+     "label": "intro",
+     "start_s": 0.0,
+     "end_s": 3.69
+    },
+    {
+     "label": "verse",
+     "start_s": 3.69,
+     "end_s": 46.676
+    },
+    {
+     "label": "drop",
+     "start_s": 46.676,
+     "end_s": 103.989
+    },
+    {
+     "label": "verse",
+     "start_s": 103.989,
+     "end_s": 118.317
+    },
+    {
+     "label": "breakdown",
+     "start_s": 118.317,
+     "end_s": 146.974
+    },
+    {
+     "label": "hands up",
+     "start_s": 146.974,
+     "end_s": 175.631
+    },
+    {
+     "label": "build",
+     "start_s": 175.631,
+     "end_s": 204.288
+    },
+    {
+     "label": "drop",
+     "start_s": 204.288,
+     "end_s": 261.601
+    },
+    {
+     "label": "outro",
+     "start_s": 261.601,
+     "end_s": 265.091
+    }
+   ]
+  },
+  {
+   "name": "fein-jan-barg-remix",
+   "file": "demo/audio/fein-jan-barg-remix.mp3",
+   "bpm": 136.0,
+   "sections": [
+    {
+     "label": "intro",
+     "start_s": 0.0,
+     "end_s": 6.697
+    },
+    {
+     "label": "breakdown",
+     "start_s": 6.697,
+     "end_s": 20.814
+    },
+    {
+     "label": "verse",
+     "start_s": 20.814,
+     "end_s": 34.932
+    },
+    {
+     "label": "drop",
+     "start_s": 34.932,
+     "end_s": 63.167
+    },
+    {
+     "label": "breakdown",
+     "start_s": 63.167,
+     "end_s": 77.285
+    },
+    {
+     "label": "verse",
+     "start_s": 77.285,
+     "end_s": 93.167
+    },
+    {
+     "label": "bridge",
+     "start_s": 93.167,
+     "end_s": 101.991
+    },
+    {
+     "label": "build",
+     "start_s": 101.991,
+     "end_s": 116.109
+    },
+    {
+     "label": "drop",
+     "start_s": 116.109,
+     "end_s": 144.344
+    },
+    {
+     "label": "outro",
+     "start_s": 144.344,
+     "end_s": 149.995
+    }
+   ]
+  },
+  {
+   "name": "weightless-extended",
+   "file": "demo/audio/weightless-extended.mp3",
+   "bpm": 130.0,
+   "sections": [
+    {
+     "label": "intro",
+     "start_s": 0.0,
+     "end_s": 29.587
+    },
+    {
+     "label": "intro, cont'd",
+     "start_s": 29.587,
+     "end_s": 62.818
+    },
+    {
+     "label": "verse",
+     "start_s": 62.818,
+     "end_s": 92.356
+    },
+    {
+     "label": "chorus",
+     "start_s": 92.356,
+     "end_s": 121.895
+    },
+    {
+     "label": "drop",
+     "start_s": 121.895,
+     "end_s": 151.433
+    },
+    {
+     "label": "bridge",
+     "start_s": 151.433,
+     "end_s": 182.818
+    },
+    {
+     "label": "verse",
+     "start_s": 182.818,
+     "end_s": 214.202
+    },
+    {
+     "label": "chorus",
+     "start_s": 214.202,
+     "end_s": 228.972
+    },
+    {
+     "label": "build",
+     "start_s": 228.972,
+     "end_s": 243.741
+    },
+    {
+     "label": "drop",
+     "start_s": 243.741,
+     "end_s": 273.279
+    },
+    {
+     "label": "outro",
+     "start_s": 273.279,
+     "end_s": 322.178
+    }
+   ]
+  },
+  {
+   "name": "multisport",
+   "file": "Kaz Bałagane, Oskar83 - Multisport (Jan Barg Flip).mp3",
+   "sha256": "4ced3164f22a34347bafdcbe457a5697649a68879e828fc8c8c865b875ecef38",
+   "bpm": 136.0,
+   "sections": [
+    {
+     "label": "intro",
+     "start_s": 0.0,
+     "end_s": 13.784
+    },
+    {
+     "label": "verse",
+     "start_s": 13.784,
+     "end_s": 56.137
+    },
+    {
+     "label": "chorus",
+     "start_s": 56.137,
+     "end_s": 70.255
+    },
+    {
+     "label": "drop",
+     "start_s": 70.255,
+     "end_s": 94.961
+    },
+    {
+     "label": "verse",
+     "start_s": 94.961,
+     "end_s": 126.725
+    },
+    {
+     "label": "build",
+     "start_s": 126.725,
+     "end_s": 140.843
+    },
+    {
+     "label": "drop",
+     "start_s": 140.843,
+     "end_s": 169.078
+    },
+    {
+     "label": "outro",
+     "start_s": 169.078,
+     "end_s": 187.246
+    }
+   ]
+  },
+  {
+   "name": "acid",
+   "file": "Jan Barg - Acid (Extended).mp3",
+   "sha256": "0bcd0659f05dc1e42f25bce0ffdc52a78f3d2b044c516934e47e2eca262404a1",
+   "bpm": 130.0,
+   "sections": [
+    {
+     "label": "intro",
+     "start_s": 0.0,
+     "end_s": 43.654
+    },
+    {
+     "label": "verse",
+     "start_s": 43.654,
+     "end_s": 62.204
+    },
+    {
+     "label": "build",
+     "start_s": 62.204,
+     "end_s": 73.334
+    },
+    {
+     "label": "drop",
+     "start_s": 73.334,
+     "end_s": 117.853
+    },
+    {
+     "label": "verse",
+     "start_s": 117.853,
+     "end_s": 147.532
+    },
+    {
+     "label": "breakdown",
+     "start_s": 147.532,
+     "end_s": 160.517
+    },
+    {
+     "label": "build",
+     "start_s": 160.517,
+     "end_s": 180.922
+    },
+    {
+     "label": "drop",
+     "start_s": 180.922,
+     "end_s": 224.375
+    },
+    {
+     "label": "outro",
+     "start_s": 224.375,
+     "end_s": 273.241
+    }
+   ]
+  },
+  {
+   "name": "gotta-know",
+   "file": "Jan Barg - Gotta Know (Extended).mp3",
+   "sha256": "b107fed96cbb4c776e39778be484a6e94dae6244ce575d840073e0048fbdbd07",
+   "bpm": 133.0,
+   "sections": [
+    {
+     "label": "intro",
+     "start_s": 0.0,
+     "end_s": 45.198
+    },
+    {
+     "label": "verse",
+     "start_s": 45.198,
+     "end_s": 86.702
+    },
+    {
+     "label": "build",
+     "start_s": 86.702,
+     "end_s": 115.574
+    },
+    {
+     "label": "drop",
+     "start_s": 115.574,
+     "end_s": 157.078
+    },
+    {
+     "label": "verse",
+     "start_s": 157.078,
+     "end_s": 169.71
+    },
+    {
+     "label": "breakdown",
+     "start_s": 169.71,
+     "end_s": 214.822
+    },
+    {
+     "label": "build",
+     "start_s": 214.822,
+     "end_s": 234.672
+    },
+    {
+     "label": "drop",
+     "start_s": 234.672,
+     "end_s": 276.176
+    },
+    {
+     "label": "outro",
+     "start_s": 276.176,
+     "end_s": 324.833
+    }
+   ]
+  },
+  {
+   "name": "infinity-2008",
+   "file": "Infinity 2008 (Jan Barg Remix).mp3",
+   "sha256": "cc515263a8db895fcad0e1deb23549f4f133f895c7a45c8beca9665f2c072294",
+   "bpm": 133.0,
+   "sections": [
+    {
+     "label": "intro",
+     "start_s": 0.0,
+     "end_s": 9.114
+    },
+    {
+     "label": "verse",
+     "start_s": 9.114,
+     "end_s": 36.182
+    },
+    {
+     "label": "drop",
+     "start_s": 36.182,
+     "end_s": 65.054
+    },
+    {
+     "label": "build",
+     "start_s": 65.054,
+     "end_s": 79.49
+    },
+    {
+     "label": "drop",
+     "start_s": 79.49,
+     "end_s": 93.926
+    },
+    {
+     "label": "breakdown",
+     "start_s": 93.926,
+     "end_s": 120.994
+    },
+    {
+     "label": "transition",
+     "start_s": 120.994,
+     "end_s": 162.497
+    },
+    {
+     "label": "drop",
+     "start_s": 162.497,
+     "end_s": 192.679
+    }
+   ]
+  }
+ ]
+}

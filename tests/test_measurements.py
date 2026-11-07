@@ -440,3 +440,51 @@ def test_short_lead_in_is_bar_1_but_a_real_pickup_is_bar_0():
     bar = 4 * BEAT
     assert sections.bar_span(0.0, bar + 0.04, 0.04, bar) == (1, 2)  # 40 ms before the first downbeat
     assert sections.bar_span(0.0, bar + 0.3, 0.3, bar) == (0, 2)  # a 300 ms pickup
+
+
+# --- Section proposal ---
+
+
+def arrangement() -> np.ndarray:
+    """96 bars at 128 BPM: intro (kick and hats) 0-24, build 24-32 (no kick, the bass thinning out), drop 32-48,
+    breakdown 48-64 (a pad only), build 64-72, drop 72-88, outro (kick and hats) 88-96. The drops have the bass on
+    the offbeat, between the kicks, which a fixed window after the beat reads as no kick at all."""
+    bar = 4 * BEAT
+    n = int(96 * bar * SR)
+    t = np.arange(n) / SR
+    beat_pos = (t % BEAT) / BEAT
+    bars = t / bar
+    rng = np.random.default_rng(0)
+    out = np.zeros(n)
+    hit = kick_hit()
+    kick_bars = lambda b: b < 24 or 32 <= b < 48 or 72 <= b < 96  # noqa: E731
+    for k in range(96 * 4):
+        if kick_bars(k // 4):
+            i = int(round(k * BEAT * SR))
+            seg = hit[: n - i]
+            out[i:i + len(seg)] += seg
+    offbeat = ((beat_pos > 0.5) & (beat_pos < 0.9)).astype(float)
+    bass_level = np.zeros(n)
+    for a, b in ((32, 48), (72, 88)):
+        bass_level[(bars >= a) & (bars < b)] = 1.0
+    for a in (24, 64):  # builds: the bass fades out over 8 bars, like a rising high-pass
+        m = (bars >= a) & (bars < a + 8)
+        bass_level[m] = 10 ** (-40 * (bars[m] - a) / 8 / 20)
+    out += 0.6 * bass_level * offbeat * np.sin(2 * np.pi * 55 * t)
+    hats = np.diff(rng.normal(0, 1, n + 1)) * np.exp(-((t % (BEAT / 2)) / 0.02))
+    out += 0.05 * hats * ~((bars >= 48) & (bars < 64))
+    out += 0.15 * ((bars >= 48) & (bars < 64)) * np.sin(2 * np.pi * 330 * t)
+    return out
+
+
+def test_sections_find_drops_with_the_bass_on_the_offbeat():
+    track = full_track(arrangement())
+    secs = sections.propose(track)
+    bar = 4 * BEAT
+    drops = [s for s in secs if s.label == "drop"]
+    assert [round(s.start_s / bar) for s in drops] == [32, 72]
+    before = {round(s.end_s / bar): s.label for s in secs}
+    assert before[32] == "build" and before[72] == "build"
+    assert secs[0].label == "intro"
+    # The breakdown follows the first drop (its second half reads as the run-up to the next drop: no low end).
+    assert any(s.label == "breakdown" and round(s.start_s / bar) == 48 for s in secs)
