@@ -279,10 +279,11 @@ def test_a_passage_chart_ignores_sections_outside_the_passage():
 
     from app.audio import figures
     times = np.arange(100.0, 130.0, 0.1)
-    series = [{"track_id": "user", "label": "Your track, drop 1", "times_s": times,
-               "short_term_lufs": np.full(times.size, -8.0)}]
+    series = [{"track_id": "user", "name": "Your track", "times_s": times,
+               "short_term_lufs": np.full(times.size, -8.0), "bar_s": 240 / 128}]
     sections = {"user": [{"label": "intro", "start_s": 0.0, "end_s": 40.0},
                          {"label": "drop 1", "start_s": 95.0, "end_s": 160.0},
                          {"label": "outro", "start_s": 4000.0, "end_s": 4100.0}]}
-    width, height = Image.open(io.BytesIO(figures.loudness_timeline(series, sections))).size
+    chart = figures.loudness_timeline(series, sections, {"user": (100.0, True)})
+    width, height = Image.open(io.BytesIO(chart)).size
     assert width <= figures.WIDTH_IN * figures.DPI * 1.1 and height < 1000

@@ -14,12 +14,24 @@ from app.evidence import Evidence, scalar
 NORMALISATION = "each track normalised once to 0 dBFS sample peak (one gain for all channels)"
 
 
-def _section_shading(scopes: list[Scope]) -> dict[str, list[dict]]:
-    shading: dict[str, list[dict]] = {}
-    for s in scopes:
-        if not s.is_whole:
-            shading.setdefault(s.track.id, []).append({"label": s.label, "start_s": s.start_s, "end_s": s.end_s})
-    return shading
+WINDOW_BARS = 32  # whole tracks: bars shown either side of the first drop
+
+
+def _line_up(scopes: list[Scope], maps: dict[str, list[dict]]) -> tuple[dict, dict]:
+    """Per track, for the loudness timeline: its section strip (its whole map for a whole track, else the passages
+    measured) and the time it is lined up at: its first drop among the passages measured, else in its map;
+    without a drop, the start of its first passage."""
+    strips, anchors = {}, {}
+    for tid in dict.fromkeys(s.track.id for s in scopes):
+        mine = [s for s in scopes if s.track.id == tid]
+        passages = sorted((s for s in mine if not s.is_whole), key=lambda s: s.start_s)
+        whole = any(s.is_whole for s in mine)
+        strips[tid] = maps.get(tid) if whole and maps.get(tid) else \
+            [{"label": s.label, "start_s": s.start_s, "end_s": s.end_s} for s in passages]
+        drops = [s.start_s for s in passages if s.label.lower().startswith("drop")] or \
+            [sec["start_s"] for sec in maps.get(tid, []) if sec["label"].lower().startswith("drop")]
+        anchors[tid] = (min(drops), True) if drops else (min(s.start_s for s in mine), False)
+    return strips, anchors
 
 
 # --- Loudness ---
@@ -65,7 +77,8 @@ def _differences(scopes: list[Scope], values: list[dict[str, float | None]], uni
     return out
 
 
-def measure_loudness(scopes: list[Scope]) -> Evidence:
+def measure_loudness(scopes: list[Scope], maps: dict[str, list[dict]] | None = None) -> Evidence:
+    """maps: track_id -> its section map, for each track measured whole (the timeline lines it up at its first drop)."""
     scalars, rows, series, warnings, values = {}, [], [], [], []
     for s in scopes:
         L = s.track.features.loudness
@@ -99,17 +112,19 @@ def measure_loudness(scopes: list[Scope]) -> Evidence:
             warnings.append(f"{d}: short-term loudness unavailable (passage shorter than its 3 s window or silent)")
         rows.append({"track_id": s.track.id, "label": d, "integrated_lufs": integrated,
                      "max_short_term_lufs": max_st, "true_peak_dbtp": true_peak})
-        series.append({"track_id": s.track.id, "label": d, "times_s": L.times_s[st_mask], "short_term_lufs": st})
+        series.append({"track_id": s.track.id, "name": s.track.name, "times_s": L.times_s[st_mask], "short_term_lufs": st,
+                       "bar_s": 4 * s.track.features.grid.beat_s})
     scalars.update(_differences(scopes, values, {"integrated loudness": "LU", "max short-term loudness": "LU",
                                                  "true peak": "dB"}))
 
-    # A section of a track whose whole timeline is already plotted shows as shading, not its own panel.
+    # A passage of a track whose whole timeline is already plotted shows in its strip, not as a second line.
     whole_ids = {s.track.id for s in scopes if s.is_whole}
     series = [x for x, s in zip(series, scopes) if s.is_whole or s.track.id not in whole_ids]
+    strips, anchors = _line_up(scopes, maps or {})
     desc = evidence.describe_scopes(scopes)
     figs = [
         evidence.figure("Loudness over time", f"Source: short-term loudness of {desc}.",
-                        figures.loudness_timeline(series, _section_shading(scopes))),
+                        figures.loudness_timeline(series, strips, anchors, WINDOW_BARS if whole_ids else None)),
         evidence.figure("Loudness and peaks at equal sample peak", f"Source: loudness and peak comparison of {desc}.",
                         figures.loudness_comparison(rows)),
     ]

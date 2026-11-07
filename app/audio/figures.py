@@ -60,6 +60,18 @@ def colour(track_id: str) -> str:
     return TRACK_COLOURS.get(track_id, "#999999")
 
 
+def shades(track_ids: list[str]) -> list[str]:
+    """One colour per plotted series: a track's first passage in the track's colour, each later passage of the same
+    track lighter (drop 1 and drop 2 of one track must not look the same)."""
+    seen: dict[str, int] = {}
+    out = []
+    for tid in track_ids:
+        k = seen[tid] = seen.get(tid, -1) + 1
+        base = np.array(matplotlib.colors.to_rgb(colour(tid)))
+        out.append(matplotlib.colors.to_hex(base + (1 - base) * min(0.7, 0.42 * k)))
+    return out
+
+
 def section_colour(label: str) -> str:
     return SECTION_COLOURS.get(label.split()[0].lower(), CUSTOM_SECTION)
 
@@ -98,8 +110,11 @@ def _legend(target, entries: list[tuple[str, str, str]], *, above=None) -> None:
     if above is None:  # an Axes
         target.legend(handles, labels, loc="lower left", bbox_to_anchor=(0, 1.0), ncol=_columns(labels),
                       borderaxespad=0.4)
-    else:  # a Figure: at its top, aligned with the given axes
-        target.legend(handles, labels, loc="upper left", bbox_to_anchor=(above.get_position().x0, 1.0),
+    else:  # a Figure: above everything drawn so far (panel titles included, however many rows the legend
+        # takes), aligned with the given axes; the tight crop takes in what sits above the figure's top
+        renderer = target.canvas.get_renderer()
+        top = max(ax.get_tightbbox(renderer).transformed(target.transFigure.inverted()).y1 for ax in target.axes)
+        target.legend(handles, labels, loc="lower left", bbox_to_anchor=(above.get_position().x0, top),
                       ncol=_columns(labels), borderaxespad=0.2)
 
 
@@ -138,38 +153,75 @@ def _colorbar(fig, mesh, axes, label: str) -> None:
 # --- Loudness ---
 
 
-def loudness_timeline(series: list[dict], sections: dict[str, list[dict]] | None = None) -> bytes:
-    """series: [{track_id, label, times_s, short_term_lufs}]; sections: track_id -> [{label, start_s, end_s}]."""
-    rows = len(series)
-    # Row heights in inches, not scaled: each row's title and the tick labels above it need fixed room.
-    fig, axes = plt.subplots(rows, 1, figsize=(WIDTH_IN, 1.6 * rows + 0.4), sharey=True, squeeze=False)
-    finite = np.concatenate([s["short_term_lufs"][np.isfinite(s["short_term_lufs"])] for s in series])
+def loudness_timeline(series: list[dict], strips: dict[str, list[dict]], anchors: dict[str, tuple[float, bool]],
+                      window_bars: float | None = None) -> bytes:
+    """All tracks on one axis, each lined up at its own anchor (its first drop) and counted in its own bars, so
+    build-ups and drops sit on top of each other however the arrangements differ.
+
+    series: [{track_id, name, times_s, short_term_lufs, bar_s}], one or more passages per track (gaps stay gaps);
+    strips: track_id -> [{label, start_s, end_s}], a section strip per track under the plot;
+    anchors: track_id -> (time at 0 bars, whether that is a drop); window_bars: bars shown either side of 0."""
+    tracks = list(dict.fromkeys(s["track_id"] for s in series))
+    names = {s["track_id"]: s["name"] for s in series}
+    bar_s = {s["track_id"]: s["bar_s"] for s in series}
+    xs = {}
+    for i, s in enumerate(series):
+        x = (np.asarray(s["times_s"]) - anchors[s["track_id"]][0]) / s["bar_s"]
+        keep = np.isfinite(s["short_term_lufs"]) & ((np.abs(x) <= window_bars) if window_bars else True)
+        xs[i] = (x[keep], np.asarray(s["short_term_lufs"])[keep])
+    shown = [v for x, v in xs.values() if v.size]
+    finite = np.concatenate(shown) if shown else np.array([])
     lo, hi = (np.floor(finite.min() / 3) * 3 - 1, np.ceil(finite.max() / 3) * 3 + 2) if finite.size else (-40, 0)
-    for ax, s in zip(axes[:, 0], series):
-        c = colour(s["track_id"])
-        x0, x1 = (s["times_s"][0], s["times_s"][-1]) if len(s["times_s"]) else (0, 1)
-        for sec in (sections or {}).get(s["track_id"], []):  # a strip along the bottom, like the section editor
-            # Only the part inside the plotted passage: a label outside it would stretch the tight-cropped image.
-            start, end = max(sec["start_s"], x0), min(sec["end_s"], x1)
-            if end <= start:
+    x_all = np.concatenate([x for x, _ in xs.values()]) if shown else np.array([0.0, 1.0])
+    x0, x1 = (-window_bars, window_bars) if window_bars else (min(x_all.min(), 0), max(x_all.max(), 1))
+
+    # Plot height fixed in inches; one strip row per track.
+    fig = plt.figure(figsize=(WIDTH_IN, 2.6 + 0.26 * len(tracks) + 0.5))
+    gs = fig.add_gridspec(2, 1, height_ratios=[2.6, 0.26 * len(tracks)], hspace=0.06)
+    ax, axs = fig.add_subplot(gs[0]), fig.add_subplot(gs[1], sharex=None)
+    for i, s in enumerate(series):
+        x, y = xs[i]
+        user = s["track_id"] == "user"
+        ax.plot(x, y, color=colour(s["track_id"]), lw=1.9 if user else 1.35, zorder=3 if user else 2)
+    ax.axvline(0, color=INK, lw=0.9, alpha=0.45, zorder=1)
+    all_drops = all(anchors[t][1] for t in tracks)
+    ax.annotate("drop" if all_drops else "lined up here", (0, 1), xycoords=("data", "axes fraction"),
+                xytext=(5, -4), textcoords="offset points", fontsize=8, color=INK_2, va="top")
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(lo, hi)
+    ax.set_ylabel("Short-term LUFS")
+    ax.tick_params(labelbottom=False)
+
+    renderer = fig.canvas.get_renderer()
+    axs.set_xlim(x0, x1)
+    axs.set_ylim(len(tracks) - 0.5, -0.5)
+    for row, tid in enumerate(tracks):
+        for sec in strips.get(tid, []):
+            a = (sec["start_s"] - anchors[tid][0]) / bar_s[tid]
+            b = (sec["end_s"] - anchors[tid][0]) / bar_s[tid]
+            a, b = max(a, x0), min(b, x1)  # only the part in view: a bar outside it would stretch the crop
+            if b <= a:
                 continue
-            sc = section_colour(sec["label"])
-            ax.axvspan(start, end, color=sc, alpha=0.06, lw=0, zorder=0)
-            ax.plot([start, end], [lo, lo], color=sc, lw=4, solid_capstyle="butt", zorder=3, clip_on=False)
-            ax.text(start + (x1 - x0) * 0.004, lo + 1.0, sec["label"], ha="left", va="bottom", fontsize=7.5,
-                    color=sc, zorder=3, clip_on=True)
-        y = s["short_term_lufs"]
-        ax.fill_between(s["times_s"], y, lo, color=c, alpha=0.05, lw=0, zorder=1)
-        ax.plot(s["times_s"], y, color=c, lw=1.3, zorder=2)
-        ax.set_ylim(lo, hi)
-        ax.set_xlim(x0, x1)
-        ax.set_ylabel("LUFS")
-        ax.set_title(s["label"], color=c)
-        _mmss(ax)
-        if ax is not axes[-1, 0]:
-            ax.set_xlabel("")
-    fig.subplots_adjust(hspace=0.8)
-    _note(fig, "Short-term loudness (3 s window). Each track normalised once to 0 dBFS sample peak.")
+            axs.barh(row, b - a, left=a, height=0.66, color=section_colour(sec["label"]), lw=0)
+            label = axs.text(a + (x1 - x0) * 0.006, row, sec["label"], va="center", fontsize=7, color=BG, clip_on=True)
+            # A section too short for its name keeps only its colour, so names never run into each other.
+            room = axs.transData.transform((b, row))[0] - label.get_window_extent(renderer).x0
+            if label.get_window_extent(renderer).width > room - 3:
+                label.remove()
+    axs.set_yticks(range(len(tracks)), [names[t] for t in tracks])
+    axs.tick_params(axis="y", labelsize=7.6, labelcolor=INK_2)
+    axs.grid(False)
+    axs.spines["bottom"].set_visible(False)
+    axs.set_xlabel("Bars from each track's first drop" if all_drops else "Bars from the point each track is lined up at")
+
+    def where(tid):
+        t, is_drop = anchors[tid]
+        return f"{'drop at' if is_drop else 'from'} {int(t // 60)}:{int(t % 60):02d}"
+    _legend(ax, [(f"{names[t]} ({where(t)})", colour(t), "-") for t in tracks])
+    _note(fig, "Short-term loudness (3 s window). Each track is lined up at its first drop "
+               + ("(or, without one, at its first passage) " if not all_drops else "")
+               + "and counted in its own bars, so build-ups and drops line up whatever the arrangement. "
+               "Each track normalised once to 0 dBFS sample peak.")
     return _png(fig)
 
 
@@ -223,9 +275,9 @@ def tonal_curves(curves: list[dict], reference_index: int = 0, note: str = "") -
     fig, (ax, axd) = plt.subplots(2, 1, figsize=_size(5.8), sharex=True,
                                   gridspec_kw={"height_ratios": [3, 2], "hspace": 0.12})
     base = curves[reference_index]
-    for c in curves:
+    cols = shades([c["track_id"] for c in curves])
+    for c, col in zip(curves, cols):
         style = "--" if c["track_id"] == "combined" else "-"
-        col = colour(c["track_id"])
         if c is base:
             ax.fill_between(c["centres"], c["level_db"], np.nanmin(c["level_db"]) - 30, color=col, alpha=0.06, lw=0)
         ax.plot(c["centres"], c["level_db"], style, color=col, lw=1.9)
@@ -237,7 +289,7 @@ def tonal_curves(curves: list[dict], reference_index: int = 0, note: str = "") -
     _zero(axd)
     ax.set_ylabel("Level (dB, 1/6 octave)")
     axd.set_ylabel("Difference (dB)")
-    _legend(ax, [(c["label"], colour(c["track_id"]), "--" if c["track_id"] == "combined" else "-") for c in curves])
+    _legend(ax, [(c["label"], col, "--" if c["track_id"] == "combined" else "-") for c, col in zip(curves, cols)])
     _hz(axd)
     ax.grid(True, which="major", axis="both")
     ax.set_xlim(20, 20000)
@@ -253,8 +305,8 @@ def tonal_curves(curves: list[dict], reference_index: int = 0, note: str = "") -
 def stereo_by_frequency(results: list[dict]) -> bytes:
     """results: [{track_id, label, centres, side_to_mid_db, mono_change_db}]."""
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=_size(5.6), sharex=True, gridspec_kw={"hspace": 0.14})
-    for r in results:
-        c = colour(r["track_id"])
+    cols = shades([r["track_id"] for r in results])
+    for r, c in zip(results, cols):
         ax1.plot(r["centres"], r["side_to_mid_db"], color=c, lw=1.8, marker="o", ms=3.2, mec=c)
         ax2.plot(r["centres"], r["mono_change_db"], color=c, lw=1.8, marker="o", ms=3.2, mec=c)
     ax1.set_ylabel("Side re mid (dB)")
@@ -266,7 +318,7 @@ def stereo_by_frequency(results: list[dict]) -> bytes:
     _zero(ax2)
     ax2.set_ylabel("Change in mono (dB)")
     ax2.set_ylim(-12, 1)
-    _legend(ax1, [(r["label"], colour(r["track_id"]), "-") for r in results])
+    _legend(ax1, [(r["label"], c, "-") for r, c in zip(results, cols)])
     _hz(ax2)
     ax1.grid(True, which="major", axis="both")
     ax1.set_xlim(20, 20000)
@@ -307,8 +359,8 @@ def kick_envelopes(kicks: list[dict]) -> bytes:
     """kicks: [{track_id, label, envelope_ms, envelope_db}] in parent-track normalisation."""
     fig, ax = plt.subplots(figsize=_size(3.6))
     top = max(np.max(k["envelope_db"]) for k in kicks)
-    for k in kicks:
-        c = colour(k["track_id"])
+    cols = shades([k["track_id"] for k in kicks])
+    for k, c in zip(kicks, cols):
         ax.fill_between(k["envelope_ms"], k["envelope_db"], top - 45, color=c, alpha=0.08, lw=0)
         ax.plot(k["envelope_ms"], k["envelope_db"], color=c, lw=1.9)
     ax.set_xlim(-10, 400)
@@ -316,7 +368,7 @@ def kick_envelopes(kicks: list[dict]) -> bytes:
     ax.axvline(0, color=ZERO, lw=0.9)
     ax.set_xlabel("Time from kick onset (ms)")
     ax.set_ylabel("30–120 Hz level (dB)")
-    _legend(ax, [(k["label"], colour(k["track_id"]), "-") for k in kicks])
+    _legend(ax, [(k["label"], c, "-") for k, c in zip(kicks, cols)])
     _note(fig, "Body-band (30–120 Hz) analytic envelope, 5 ms smoothing, of each selected kick, at its track's "
                "whole-track peak normalisation.")
     return _png(fig)
@@ -360,16 +412,16 @@ def recovery_envelopes(results: list[dict], band_names: list[str]) -> bytes:
     """results: [{track_id, label, bpm, recoveries: {band: BandRecovery}}]; one panel per band."""
     fig, axes = plt.subplots(1, len(band_names), figsize=_size(3.5), sharey=True, squeeze=False,
                              gridspec_kw={"wspace": 0.08})
+    cols = shades([r["track_id"] for r in results])
     for ax, name in zip(axes[0], band_names):
         rec = None
         if results:
             beat_ms = 60000.0 / results[0]["bpm"]
             ax.axvspan(0.5 * beat_ms, 0.8 * beat_ms, color=INK, alpha=0.05, lw=0)
-        for r in results:
+        for r, c in zip(results, cols):
             rec = r["recoveries"][name]
             if not len(rec.curve_time_ms):
                 continue
-            c = colour(r["track_id"])
             ax.fill_between(rec.curve_time_ms, rec.curve_q1_db, rec.curve_q3_db, color=c, alpha=0.14, lw=0)
             ax.plot(rec.curve_time_ms, rec.curve_median_db, color=c, lw=1.7, ls="-" if rec.available else (0, (3, 2)))
             if rec.available:
@@ -377,14 +429,16 @@ def recovery_envelopes(results: list[dict], band_names: list[str]) -> bytes:
                     ax.plot(t, np.interp(t, rec.curve_time_ms, rec.curve_median_db), "o", color=c, ms=4.5,
                             mec=BG, mew=1.0, zorder=4)
         lo, hi = rec.band_hz if rec is not None else (0, 0)
-        ax.set_title(f"{name.replace('_', ' ').capitalize()}  {lo:g}–{hi:g} Hz", fontsize=8.8)
+        # The band's name over its range, on two lines: four panels are too narrow for both on one.
+        ax.set_title(name.replace("_", " ").capitalize(), fontsize=8.8, pad=19)
+        ax.annotate(f"{lo:g}–{hi:g} Hz", (0, 1), xycoords="axes fraction", xytext=(0, 6), textcoords="offset points",
+                    fontsize=7.8, color=MUTED, va="bottom")
         _zero(ax)
         ax.set_xlabel("ms after kick")
         ax.set_ylim(-30, 25)
-    entries = [(r["label"], colour(r["track_id"]), "-") for r in results]
+    entries = [(r["label"], c, "-") for r, c in zip(results, cols)]
     axes[0][0].set_ylabel("Level re baseline (dB)")
     if entries:
-        fig.subplots_adjust(top=0.78)
         _legend(fig, entries, above=axes[0][0])
     _note(fig, "Median band envelope across kick events (band: middle 50%), relative to each event's baseline "
                "(median level from 50% to 80% of the beat, lightly shaded). Dots: deepest dip and recovery. Dashed: "
@@ -396,14 +450,14 @@ def recovery_envelopes(results: list[dict], band_names: list[str]) -> bytes:
 def low_end_distribution(results: list[dict]) -> bytes:
     """results: [{track_id, label, centres, level_db}] for 20-300 Hz."""
     fig, ax = plt.subplots(figsize=_size(3.5))
-    for r in results:
-        c = colour(r["track_id"])
+    cols = shades([r["track_id"] for r in results])
+    for r, c in zip(results, cols):
         ax.plot(r["centres"], r["level_db"], color=c, lw=1.9, marker="o", ms=3.4, mec=c)
     _hz(ax)
     ax.set_xticks([20, 30, 40, 60, 80, 100, 150, 200, 300])
     ax.set_xlim(20, 300)
     ax.set_ylabel("Level (dB, 1/6 octave)")
-    _legend(ax, [(r["label"], colour(r["track_id"]), "-") for r in results])
+    _legend(ax, [(r["label"], c, "-") for r, c in zip(results, cols)])
     _note(fig, "Power-averaged over the passage; each track normalised once to 0 dBFS sample peak. Below about "
                "40 Hz the analysis resolution is coarser than the bands.")
     return _png(fig)

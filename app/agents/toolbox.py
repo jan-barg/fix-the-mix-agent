@@ -128,7 +128,11 @@ class Toolbox:
         """The computation and the cache key that identifies its result."""
         if name == "measure_loudness":
             scopes = self.scopes(a.scopes)
-            return (lambda: tools.measure_loudness(scopes)), cache_key(name, scopes, {})
+            # A whole track lines up at its first drop in the timeline, so its section map is part of the result.
+            maps = {s.track.id: [{"label": x["label"], "start_s": round(x["start_s"], 3), "end_s": round(x["end_s"], 3)}
+                                 for x in self.run.current_map(s.track.id).sections]
+                    for s in scopes if s.is_whole and self.run.current_map(s.track.id)}
+            return (lambda: tools.measure_loudness(scopes, maps)), cache_key(name, scopes, {"maps": maps} if maps else {})
         if name == "measure_stereo":
             scopes = self.scopes(a.scopes)
             return (lambda: tools.measure_stereo(scopes)), cache_key(name, scopes, {})
