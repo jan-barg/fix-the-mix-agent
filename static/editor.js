@@ -334,17 +334,55 @@ export class SectionEditor {
       }
     }, { passive: false });
 
+    // The overview: drag an edge of the window in view to zoom, drag inside it to scroll, drag anywhere else to
+    // frame a new range; a click centres the view there, a double-click shows the whole track.
     const ov = this.overview;
-    let ovDrag = false;
-    const ovMove = (e) => {
-      const t = (pos(e, ov).x / ov.clientWidth) * this.duration;
-      this.viewStart = t - this.width / this.pxPerS / 2;
+    let ovDrag = null;
+    const ovT = (e) => Math.min(this.duration, Math.max(0, (pos(e, ov).x / ov.clientWidth) * this.duration));
+    const ovHit = (e) => {
+      const x = pos(e, ov).x, k = ov.clientWidth / this.duration;
+      const a = this.viewStart * k, b = (this.viewStart + this.width / this.pxPerS) * k;
+      if (b - a >= ov.clientWidth - 2) return "frame";  // the whole track is in view: no window to grab
+      if (Math.abs(x - a) <= 8) return "start";
+      if (Math.abs(x - b) <= 8) return "end";
+      return x > a && x < b ? "inside" : "frame";
+    };
+    const showRange = (t0, t1) => {
+      this.pxPerS = this.width / Math.max(t1 - t0, this.width / MAX_PX_PER_S);
+      this.viewStart = t0;
       this.clampView();
       this.draw();
     };
-    ov.addEventListener("pointerdown", (e) => { ovDrag = true; ov.setPointerCapture(e.pointerId); ovMove(e); });
-    ov.addEventListener("pointermove", (e) => ovDrag && ovMove(e));
-    ov.addEventListener("pointerup", () => { ovDrag = false; });
+    ov.addEventListener("pointerdown", (e) => {
+      ov.setPointerCapture(e.pointerId);
+      const t = ovT(e), start = this.viewStart, end = start + this.width / this.pxPerS;
+      ovDrag = { hit: ovHit(e), t0: t, x0: pos(e, ov).x, offset: t - start, start, end, moved: false };
+      if (ovDrag.hit === "inside") ov.style.cursor = "grabbing";
+    });
+    ov.addEventListener("pointermove", (e) => {
+      const d = ovDrag;
+      if (!d) {
+        ov.style.cursor = { start: "ew-resize", end: "ew-resize", inside: "grab" }[ovHit(e)] || "crosshair";
+        return;
+      }
+      if (!d.moved && Math.abs(pos(e, ov).x - d.x0) < 3) return;
+      d.moved = true;
+      const t = ovT(e), least = this.width / MAX_PX_PER_S;
+      if (d.hit === "start") showRange(Math.min(t, d.end - least), d.end);
+      else if (d.hit === "end") showRange(d.start, Math.max(t, d.start + least));
+      else if (d.hit === "inside") { this.viewStart = t - d.offset; this.clampView(); this.draw(); }
+      else showRange(Math.min(d.t0, t), Math.max(d.t0, t));
+    });
+    ov.addEventListener("pointerup", (e) => {
+      if (ovDrag && !ovDrag.moved) {  // a click: same zoom, centred there
+        this.viewStart = ovDrag.t0 - this.width / this.pxPerS / 2;
+        this.clampView();
+        this.draw();
+      }
+      ovDrag = null;
+      ov.style.cursor = { start: "ew-resize", end: "ew-resize", inside: "grab" }[ovHit(e)] || "crosshair";
+    });
+    ov.addEventListener("dblclick", () => { this.fit(); this.draw(); });
 
     this.root.addEventListener("click", (e) => {
       const btn = e.target.closest("button");
@@ -692,6 +730,13 @@ export class SectionEditor {
       ctx.strokeStyle = SCREEN.ovBox; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.roundRect(vx + 0.75, 0.75, Math.max(4, vw - 1.5), h - 1.5, 7); ctx.stroke();
       ctx.lineWidth = 1;
+      // Grips on both edges: drag them to zoom.
+      for (const gx of [Math.max(4, vx + 0.75), Math.min(w - 4, vx + vw - 0.75)]) {
+        ctx.fillStyle = SCREEN.ovBox;
+        ctx.beginPath(); ctx.roundRect(gx - 3.5, h / 2 - 10, 7, 20, 3.5); ctx.fill();
+        ctx.fillStyle = SCREEN.well;
+        ctx.fillRect(gx - 0.5, h / 2 - 5, 1, 10);
+      }
     }
     const t = this.audio.paused ? this.cursor : this.audio.currentTime;
     ctx.fillStyle = this.audio.paused ? SCREEN.cursor : SCREEN.playhead;
