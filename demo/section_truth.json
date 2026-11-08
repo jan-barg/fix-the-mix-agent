@@ -44,11 +44,11 @@
     {
      "label": "build",
      "start_s": 207.395,
-     "end_s": 225.305
+     "end_s": 221.723
     },
     {
-     "label": "build",
-     "start_s": 225.305,
+     "label": "drop",
+     "start_s": 221.723,
      "end_s": 250.38
     },
     {

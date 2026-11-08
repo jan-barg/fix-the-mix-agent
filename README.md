@@ -6,6 +6,8 @@ Fix the Mix gives electronic music producers measured, section-aware feedback on
 - **Path:** Deep Research (Project 2). Solo project by Jan Barg (jgb2170).
 - **Data:** the producer's own audio. The models have never heard these recordings; every number in a report comes from measuring them (see [Data](#data)).
 
+> **A note from me:** yes, this is very technical and nerdy. But as a music producer, trust me, it is immensely helpful.
+
 ## Try it
 
 1. Open the live app and click **Or try it with the demo tracks**. This loads my track *Scars* and three references, with comments already filled in.
@@ -17,7 +19,7 @@ To use your own music, upload WAV or MP3 files of up to 30 MB and between 20 sec
 
 ## Sample queries
 
-These come from one demo run on the live app on November 7, 2026. [`scripts/sample_queries.py`](scripts/sample_queries.py) asked them exactly as the browser does. Sample 1 is the demo's request; samples 2 and 3 are follow-up questions typed under the report. The run cost $2.26 in all. Here is [its report](https://fix-the-mix-347988227457.us-east1.run.app/api/runs/8ed6485c-454a-40ed-8a3a-41c65eb9a7a3/report) ([PDF](https://fix-the-mix-347988227457.us-east1.run.app/api/runs/8ed6485c-454a-40ed-8a3a-41c65eb9a7a3/report.pdf)), and [the run itself](https://fix-the-mix-347988227457.us-east1.run.app/#run=8ed6485c-454a-40ed-8a3a-41c65eb9a7a3) shows the trace. The raw replies, with every tool call, are in [`demo/samples/agent.json`](demo/samples/agent.json).
+These come from one demo run on the live app on November 7, 2026. [`scripts/sample_queries.py`](scripts/sample_queries.py) asked them exactly as the browser does. Sample 1 is the demo's request; samples 2 and 3 are follow-up questions typed under the report. The run cost $2.41 in all. Here is [its report](https://fix-the-mix-347988227457.us-east1.run.app/api/runs/939352d9-8b4c-43e7-8f2e-14834fbaa8d7/report) ([PDF](https://fix-the-mix-347988227457.us-east1.run.app/api/runs/939352d9-8b4c-43e7-8f2e-14834fbaa8d7/report.pdf)), and [the run itself](https://fix-the-mix-347988227457.us-east1.run.app/#run=939352d9-8b4c-43e7-8f2e-14834fbaa8d7) shows the trace. The raw replies, with every tool call, are in [`demo/samples/agent.json`](demo/samples/agent.json).
 
 **Baselines.** [`scripts/baselines.py`](scripts/baselines.py) sent the same three questions, in one conversation, to the Lead's model (Claude Opus 5.5 through LiteLLM) with no tools and no system prompt. The first message gives what the producer types into the app: which track is which, the titles and the comments. The model gets no audio and no measurements. The Lead runs at high reasoning effort, the baseline at the default. The raw answers are in [`demo/samples/baseline.json`](demo/samples/baseline.json) ($0.11 for all three).
 
@@ -27,39 +29,43 @@ The demo fills this in as the request, with a comment on each track (see [Data](
 
 **What the agent did:**
 
-- **Brief, 26 s.** The Lead recorded the goals, each reference's job and what to keep. It asked the producer to check one thing: whether the "chorus" at 2:58–3:27 is really a second drop. The script confirmed the sections as they were.
-- **Round 1.** The kick, low-end, tonal-and-loudness and stereo researchers started in the same second, and each finished 55–68 s later.
-- **Round 2.** The Lead analysed another pair of kicks itself, then sent kick and low-end follow-ups in parallel. They checked whether the weak kick attack held on other kicks, and measured ducking on passages where the bass is steadier.
-- **Finishing.** `finish_research` was refused once because an accepted finding quoted a number its evidence did not back. The Lead rejected that finding and finished with 51 findings accepted, 18 rejected and 3 priorities.
-- **Report.** Writer, checks, Humanizer, then HTML and PDF. The whole analysis took 336 s.
+- **Brief, 24 s.** The Lead recorded the goals, each reference's job and what to keep. It noticed that Reference 2's only build leads into its second drop, so it planned to compare that build-to-drop jump with both of yours.
+- **Before round 1.** The Lead measured the section loudness and found kick candidates in your track and Reference 1.
+- **Round 1.** The kick, low-end, tonal-and-loudness and stereo researchers started in the same second, and each finished 35–58 s later.
+- **Round 2.** The Lead sent kick and low-end follow-ups in parallel:
+  - Do drop 1's kick differences repeat on a drop 2 kick?
+  - Is the extra energy below 40 Hz sustained between kicks (a sub bass) or lined up with them (the kick's tail)?
+- **Finishing.** 58 findings accepted, 12 rejected, 3 priorities.
+- **Report.** Writer, checks, Humanizer, then HTML and PDF: 403 s for the whole analysis.
 
-**Agent's answer** (the summary shown when the analysis finishes; one dash came back as the escape code `\u2013`, shown as a dash here; the app now decodes these):
+**Agent's answer** (the summary shown when the analysis finishes):
 
-> The kick isn't quieter than Reference 1's; peak and early level match. The biggest, most consistent difference is below 40 Hz: your drop carries much more deep sub at 28–35 Hz than Reference 1 in both halves of the drop, and your sub barely ducks around the kick while Reference 1's ducks deeply. Taming that region and letting the sub duck for the kick is the top priority. Second, your kick's pitch settles lower (around 38 Hz vs around 43 Hz) in both kicks analysed; nudging it up or shortening the tail could tighten the weight. Third, your build-to-drop jump already matches Reference 2 overall; more impact would come from a slightly lighter build rather than a louder drop. Keep your dark top end, your 56–111 Hz bass balance, the mono low end and the current drop loudness.
+> The main reason the kick feels buried looks like focus, not level. Your drops carry much more energy in the deepest sub (below about 40 Hz) than Reference 1, and less right around 44 Hz where Reference 1's kick weight sits. Your kick also sweeps lower, ending near 38 Hz against Reference 1's 43 Hz. From about 50 to 300 Hz you already match Reference 1, and your kick isn't quieter. So the priority is to tighten the sub (high-pass around 30 Hz, then try 35 Hz) and tune or shorten the kick's tail so it ends higher. None of that touches your darker top end. Second, your first drop already lifts more than Reference 2's, but drop 2 lifts less because build 2 is loud. Pulling build 2 down by about 1 dB should help. Third, drop 2 already peaks just over 0 dBTP, so keep an eye on the limiter as the kick gains weight. Keep your dark top, the mono low end, your current bass ducking and your stereo width. You don't need to add width to match Reference 3.
 
 The report's priorities:
 
-1. **Clean up the energy below 40 Hz and let the sub duck for the kick.** Your drop has far more energy at 28 and 35 Hz than Reference 1, consistently in both halves of the drop, while 56–111 Hz already matches. Your sub barely ducks around the kick (about 1.6 dB) whereas Reference 1's ducks about 16.5 dB, so each of its hits reads as a separate event. This is the most consistent measured difference behind the kick feeling buried, and fixing it only touches the sub, so the darker tone is safe.
-2. **Tune or shorten the kick's low tail so it settles nearer Reference 1's pitch.** In both analysed kicks your kick's pitch settles near 38 Hz, while Reference 1's settles near 43 Hz in both. A deeper settling sweep could feed the sub-40 Hz build-up and overlap the bass fundamental. Retuning slightly higher or shortening the tail may give a tighter, more forward weight like Reference 1, with no top-end change.
-3. **Get more build-to-drop contrast by easing the build, not pushing the drop.** Your build-to-drop integrated jump (2.12 LU) already matches Reference 2's (2.03 LU), but Reference 2's short-term lift is larger (2.27 vs 1.33 LU). Your drop is already louder than both Reference 2 drops and your build is dense, so extra impact has to come from a slightly lighter build.
+1. **Tighten the sub below 40 Hz and tune the kick body up toward Reference 1.** This is the clearest and most consistent difference behind the kick feeling buried. Both drops carry far more energy at 22-35 Hz than Reference 1 (35 Hz: -19.8 dB vs -36.65 dB in drop 1) but less at 44 Hz, and your kick's pitch sweeps down to about 38 Hz against Reference 1's 43 Hz, with a lower body peak and centroid on two separate kicks. Level from about 50 to 300 Hz already matches, and the kick's own level is not lower, so the fix is focus, not more level. These are low-end changes, so the darker top end stays as it is.
+2. **Give drop 2 a bigger lift by pulling build 2 down.** Reference 2 is the target for the build-to-drop jump. Your build 1 into drop 1 jump (2.12 LU) is already bigger than Reference 2's first jump, but build 2 into drop 2 is 1.52 LU against Reference 2's 2.03 LU, because build 2 is louder (-8.70 LUFS vs -9.97 LUFS), not because drop 2 is quiet.
+3. **Watch the true peak in drop 2 as the kick gets more weight.** This is the master: drop 2 reaches 0.37 dBTP, above 0 dBTP, and any extra kick and bass energy will push the limiter harder. Reference 1 also goes over, so this is a check, not a disaster.
 
 <details>
 <summary>The Lead's reply to the request, before the analysis</summary>
 
-> I've got your goals. Here's what I'll look at:
+> I've set up the brief like this:
 >
-> **Goals**
-> - Make the kick and bass hit harder in the drops. Right now the kick feels a bit buried under the bass.
-> - Keep the darker tone you have now. Nothing I suggest should brighten the track.
+> **What you're after**
+> - A harder-hitting kick and bass in the drops. You said the kick feels a bit buried under the bass, so the balance and separation between them is the main thing I'll look at.
+> - **Keep:** your darker tone. I won't treat any reference's brighter top end as something to match.
+> - This is your mastered version, so I'll compare loudness at equal peak level.
 >
 > **What each reference is for**
-> - **Reference 1 (Endless Light):** how heavy the kick and bass are in the drop, and how the kick sits against the bass.
-> - **Reference 2 (FE!N remix):** how much louder it gets from the build into the drop.
-> - **Reference 3 (Weightless):** stereo width only. I won't treat its brighter top end as a target.
+> - **Reference 1:** kick and bass weight in the drop, and how the kick sits against the bass.
+> - **Reference 2:** how much louder it gets going from the build into the drop.
+> - **Reference 3:** stereo width only, not its brighter top end.
 >
-> **Assumptions:** this is your mastered version, so I'll compare loudness at master stage. I'll judge each reference only on the job you gave it.
+> **One thing to check:** in Reference 2, the only section marked as a build leads into its second drop, not its first. So I'll compare its build-to-drop jump with both of yours (build 1 into drop 1, and build 2 into drop 2). Right now your build 2 isn't paired with any reference section. If a reference has a build before its first drop that isn't marked, adjust the sections.
 >
-> **Please check the sections before I start.** In your track, only 1:47–2:15 is marked as a drop. The section marked "chorus" (2:58–3:27) and the two builds after it (3:27–4:10) could be a second drop and its build-up. If so, please relabel them so I can compare both drops and the jump from each build into its drop. Everything else looks plausible. Let me know if any boundaries need moving, then confirm.
+> Please check the section times for all four tracks, especially the drops and builds, and confirm them. I'll start the analysis once they're confirmed.
 
 </details>
 
@@ -123,36 +129,43 @@ These moves help, but they're less effective than separating the kick and bass i
 
 </details>
 
-**The difference.** The baseline says it can't hear the audio and gives a sound general checklist: sidechain the bass below 150 Hz, saturate the kick, add attack, make the build quieter. The agent measured that the kick's level is not the problem (its peak matches Reference 1's). The excess is the sub at 28–35 Hz, and the sub ducks about 1.6 dB around the kick against about 16.5 dB in Reference 1. It also found the kick's attack weaker than the reference's on one pair of kicks and stronger on another, so it did not tell you to add attack.
+**The difference.** The baseline says it can't hear the audio and gives a sound general checklist: sidechain the bass below 150 Hz, saturate the kick, add attack, make the build quieter. The agent measured where the problem actually is:
+
+- Both drops carry far more energy at 22–35 Hz than Reference 1 and less at 44 Hz.
+- The kick's pitch ends near 38 Hz against 43 Hz for Reference 1.
+- From 50 to 300 Hz the two tracks already match, and the kick is not quieter.
+
+It also found something the baseline could not know: drop 2 already peaks just over 0 dBTP.
 
 ### 2. "How does my build-to-drop loudness jump compare with Reference 2, and where does mine differ?"
 
-**What the agent did:** one Lead call, 11 s, no new measurements. Round 1 had already measured every section's loudness, so it answered from that evidence.
+**What the agent did:** one Lead call, 20 s, no new measurements. Round 1 had already measured every section's loudness, so it answered from that evidence.
 
 **Agent's answer:**
 
-> On overall loudness, your jump from build into drop is already about the same as Reference 2's. The difference shows up at the loudest moments, and that's because your build starts higher.
+> Your first drop lands as hard as Reference 2's. The second one is where you fall short, and the cause is the build, not the drop.
 >
-> **Average loudness (integrated)**
-> - **Your track:** build 1 is -9.25 LUFS and the drop is -7.13 LUFS, so the jump is 2.12 LU.
-> - **Reference 2:** the build is -9.97 LUFS and drop 2 is -7.93 LUFS, so the jump is 2.03 LU.
+> **Into the first drop**
+> - **Your track, build 1 into drop 1:** 2.12 LU jump in integrated loudness (from -9.25 to -7.13 LUFS).
+> - **Reference 2, verse 1 into drop 1:** 1.27 LU (from -9.13 to -7.87 LUFS).
 >
-> **Loudest moments (max short-term)**
-> - **Your track:** rises 1.33 LU from build to drop.
-> - **Reference 2:** rises 2.27 LU.
+> On average your first jump is bigger than Reference 2's. If you look at the loudest moments (max short-term loudness) instead, it's slightly smaller: 1.33 LU against 1.51 LU. So the build 1 into drop 1 transition is fine overall. One caveat: in Reference 2 a verse comes before the first drop, not a build, so this isn't a perfect like-for-like comparison.
 >
-> So on the overall level the two jumps match. At the loudest moments, Reference 2's drop steps up more, and that's probably where its drop feels bigger.
+> **Into the second drop (the like-for-like comparison)**
+> - **Your track, build 2 into drop 2:** 1.52 LU integrated, 1.68 LU at the loudest moments.
+> - **Reference 2, build into drop 2:** 2.03 LU integrated, 2.27 LU at the loudest moments.
+>
+> Here your jump is smaller on both measures.
 >
 > **Where yours differs**
-> - **Your build is already loud.** It's 0.72 LU louder than Reference 2's build. Its loudest moments reach -7.63 LUFS, which is close to Reference 2's drop levels. So the drop has less room to feel like a step up.
-> - **Your drop is louder than Reference 2's.** It's -7.13 LUFS, against -7.93 LUFS for Reference 2's drop 2 and -7.87 LUFS for its drop 1. Making the drop even louder isn't the way to get more contrast.
-> - **Your build leans on the mids.** Its mid band is -16.06 dB and its sub is -28.65 dB. That could make it sound loud and full before the drop arrives. I didn't measure Reference 2's build bands, so I can't say whether its build is thinner down low.
+> - **Your drops aren't the problem.** At equal peak level, your drops measure -7.13 and -7.18 LUFS against Reference 2's -7.87 and -7.93 LUFS, so they're already louder.
+> - **Build 2 is the problem.** It sits at -8.70 LUFS against Reference 2's build at -9.97 LUFS. It's also louder than your own build 1 (-9.25 LUFS), so the drop has less room to lift from.
+> - **Less of a dip after drop 1.** Your build 2 comes in 1.57 LU below drop 1, while Reference 2's build sits 2.10 LU below its first drop. Reference 2 drops lower before the final drop, so the drop feels bigger.
 >
 > **What to try**
+> Leave drop 2 as it is and bring build 2 down by about 1 dB. You can turn it down outright or thin out its low-mid and mid content. Then re-measure, aiming for a jump of about 2 LU like Reference 2's. Turning the build down doesn't add any brightness, so your darker tone stays as it is.
 >
-> Ease the build back a little and leave the drop as it is. For example, trim the mid-range layers in build 1 by about 1 dB, or back off any bus compression on the build. Then check whether the jump at the loudest moments grows toward Reference 2's 2.27 LU while the drop level stays put. Opening up the sub in the drop (the top priority from the main analysis) might also help the drop feel like more of a step up, but that's untested.
->
-> **Caveats:** Reference 2's build is 8 bars and yours is 16, so this isn't a like-for-like comparison. Both tracks are finished masters, so limiting also shapes these numbers.
+> One thing to keep an eye on: drop 2 already peaks at 0.37 dBTP, just over full scale. So get the extra lift by lowering the build, not by pushing the drop louder.
 
 <details>
 <summary>Baseline: same model, no tools, no system prompt (verbatim, headings shown smaller)</summary>
@@ -190,43 +203,50 @@ Send me the numbers in roughly this form and I'll tell you specifically where yo
 
 </details>
 
-**The difference.** Both reach the same advice: ease the build rather than push the drop. The baseline guesses it and asks you to measure. The agent shows it:
+**The difference.** Both reach the same advice: ease the build rather than push the drop. The baseline guesses it and asks you to measure. The agent shows where it applies:
 
-- The average jumps match (2.12 against 2.03 LU).
-- The jump at the loudest moments does not (1.33 against 2.27 LU).
-- Your build is 0.72 LU louder than Reference 2's.
+- Your first drop already lifts more than Reference 2's (2.12 against 1.27 LU).
+- Your second drop lifts less (1.52 against 2.03 LU).
+- The cause is build 2 at −8.70 LUFS, against −9.97 LUFS for Reference 2's build.
 
-It also says what it did not measure (Reference 2's build bands) and that the two builds differ in length.
+It also notes that Reference 2's first drop follows a verse, not a build.
 
 ### 3. "How does my stereo width in the drops compare with Reference 3, and what changes in mono?"
 
-**What the agent did:** the Lead measured the stereo image of your drop and Reference 3's first drop itself (one `measure_stereo` call), then answered: 12 s.
+**What the agent did:** one Lead call, 13 s, from the stereo measurements round 1 had already made on both drops.
 
 **Agent's answer:**
 
-> Your drop isn't simply wider or narrower than Reference 3's. Your low end is narrower, your mids are about the same, and your highs are much wider. In mono, only the highs lose noticeable level. For side relative to mid, a number closer to 0 dB means wider.
+> Overall your drops are about as wide as Reference 3's, but the width sits in different places. Yours is in the highs, while Reference 3's comes more from the lows and mids.
 >
-> **Low end (below 120 Hz)**
-> - **Your track:** -30.27 dB side relative to mid, which is almost pure mono. Mono change is 0 dB.
-> - **Reference 3:** -15.94 dB, so noticeably more width down low. Mono change is -0.11 dB.
+> **Lows (below 120 Hz)**
+> - **Your track:** side is -30.27 dB relative to the centre in drop 1 and -29.45 dB in drop 2, so it's essentially mono. Folding to mono changes the level by nothing (0 dB).
+> - **Reference 3:** -15.94 dB in drop 1 and -19.05 dB in drop 2, so a bit wider. It still loses almost nothing in mono: 0.11 dB in drop 1 and 0.05 dB in drop 2.
 >
-> Both fold down cleanly. Your centred low end is safe for clubs and mono playback, and it doesn't explain the buried kick. I'd keep it as it is. If you want a bit of Reference 3's low width, add it only around 100–200 Hz (for example a subtle stereo layer on the bass), never on the kick or sub.
+> Your mono low end isn't a problem. It keeps the kick and bass centred and solid, which is what you want for more punch. I'd keep it.
 >
 > **Mids (120 Hz to 2 kHz)**
-> - **Your track:** -5.25 dB, losing 1.13 dB in mono.
-> - **Reference 3:** -5.68 dB, losing 1.04 dB in mono.
+> - **Drop 1:** your side-to-centre is -5.25 dB against Reference 3's -5.68 dB, so you're about level.
+> - **Drop 2:** yours is -4.44 dB against -3.05 dB, so Reference 3 is a little wider here.
 >
-> These are close enough to call a match. Nothing to change here.
+> Both tracks lose a modest, similar amount in mono. This is the only band where you're narrower, and only in drop 2. If you want more width, add it here.
 >
 > **Highs (above 2 kHz)**
-> - **Your track:** -1.37 dB, losing 2.38 dB in mono.
-> - **Reference 3:** -6.82 dB, losing 0.82 dB in mono.
+> - **Drop 1:** your side is -1.37 dB relative to the centre, almost as loud as the centre. Reference 3 is at -6.82 dB.
+> - **In mono:** your highs lose 2.38 dB in drop 1 and 2.39 dB in drop 2. Reference 3 loses 0.82 dB and 1 dB.
 >
-> This is the real difference. Your top end is much wider than Reference 3's, and it loses more level when summed to mono. The cause could be wide hats, reverbs or stereo-widened top layers, or stereo processing in the master; the measurements can't say which. There's no case for adding more top-end width. If mono playback matters to you, try lowering the side level above 2 kHz by about 1–2 dB with mid/side EQ, or trimming wide hat and reverb sends. Don't add any brightness while you do it. Then check that the mono loss in the highs moves toward about 1 dB.
+> Your top end is clearly wider than Reference 3's and loses more when folded to mono. That fits with wide hats, reverbs or stereo-widened top layers, but the measurement can't tell which instruments cause it.
 >
-> **Overall:** L/R correlation is healthy in both drops (0.83 for yours, 0.80 for Reference 3), with no stretches of negative correlation, so there are no phase problems.
+> **Correlation**
+> - **Your track:** median left/right correlation of 0.83 in drop 1 and 0.79 in drop 2, with no out-of-phase moments.
+> - **Reference 3:** 0.8 in drop 1 and 0.65 in drop 2. In drop 2, 4.11% of the short windows are out of phase, from a short stretch at its start.
 >
-> I'd treat this as a secondary point next to the kick and sub work, because width doesn't change how hard the kick and bass hit. Also, Reference 3 is a single reference at a different tempo, so take its width as a loose guide.
+> **What I'd do**
+> - Leave everything below about 100 Hz centred. Don't add low-end width to copy Reference 3.
+> - For a touch more width in drop 2, open up the 120–300 Hz region of the bass or pad layers slightly with mid/side EQ. Then check that the lows still lose nothing in mono.
+> - Check your widest top layers in mono and pull back the width, or swap phase-based wideners for mid/side EQ. That should cut your high-band mono loss without boosting anything, so your darker top end stays the same.
+>
+> Reference 3's width doesn't come from its top end, so you don't need to make yours brighter or wider to match it.
 
 <details>
 <summary>Baseline: same model, no tools, no system prompt (verbatim, headings shown smaller)</summary>
@@ -271,7 +291,13 @@ Do the same mono check on Weightless. If it holds up better than yours, that tel
 
 </details>
 
-**The difference.** The baseline expects the brighter reference to seem wider, and tells you to judge width below 6–8 kHz. The agent found the opposite in the top end. Your highs are much wider than Reference 3's (−1.37 against −6.82 dB side to mid) and lose more when summed to mono (2.38 against 0.82 dB). Your low end is mono and the mids match.
+**The difference.** The baseline expects the brighter reference to seem wider, and tells you to judge width below 6–8 kHz. The agent found overall width about equal but placed differently:
+
+- **Lows:** yours are mono, Reference 3's are wider.
+- **Mids:** about level, yours slightly narrower in drop 2.
+- **Highs:** yours are much wider. They lose about 2.4 dB when summed to mono, against 0.8–1 dB for Reference 3.
+
+It also caught a short out-of-phase stretch at the start of Reference 3's drop 2.
 
 ## Data
 
@@ -290,7 +316,7 @@ The audio is not in this repository, because of its size and the third-party rig
 
 **How a track is loaded.** Each upload is decoded with FFmpeg and normalised once so its loudest sample peak sits at 0 dBFS. Everything is measured on that one version, so build-to-drop contrast and channel balance survive and tracks mastered at different levels can be compared. A base analysis then finds the tempo, beat grid and bars, draws a three-band waveform and proposes sections. The producer corrects the sections in the editor before any research starts.
 
-**Answer key for the section finder.** [`demo/section_truth.json`](demo/section_truth.json) holds 8 tracks that I sectioned by hand (16 drops), used to choose and tune the section finder (below).
+**Answer key for the section finder.** [`demo/section_truth.json`](demo/section_truth.json) holds 8 tracks that I sectioned by hand (17 drops), used to choose and tune the section finder (below).
 
 ## How it works
 
@@ -332,7 +358,7 @@ flowchart LR
 
 ## Section finder: approaches and hill-climbing
 
-Every comparison is drop against drop and build against build, so the sections matter. The app proposes them and the producer corrects them. The first finder found only 7 of the 16 drops in my hand-made maps. It measured the kick by comparing the low end just after each beat with the low end late in the beat. With the bass on the offbeat or rolling, that late window is full of bass, so a full drop read as "no kick" and was called a breakdown.
+Every comparison is drop against drop and build against build, so the sections matter. The app proposes them and the producer corrects them. The first finder found only 8 of the 17 drops in my hand-made maps. It measured the kick by comparing the low end just after each beat with the low end late in the beat. With the bass on the offbeat or rolling, that late window is full of bass, so a full drop read as "no kick" and was called a breakdown.
 
 I turned my own rules of thumb into per-bar features on a 4-bar grid:
 
@@ -358,12 +384,20 @@ Hill-climbing started from hand-set values. It changed one or two settings at a 
 
 | Finder | Score, tuned on all 8 | Leave-one-out | Drops found (leave-one-out) |
 |---|---|---|---|
-| First version | 0.32 (not tuned) | — | 7 / 16 |
-| N, cut then label | 0.72 | 0.42 | 9 / 16 |
-| V, sequence | 0.67 | 0.51 | 13 / 16 |
-| R, drops first | 0.80 | 0.67 | 14 / 16 |
+| First version | 0.33 (not tuned) | — | 8 / 17 |
+| N, cut then label | 0.76 | 0.44 | 9 / 17 |
+| V, sequence | 0.71 | 0.58 | 14 / 17 |
+| R, drops first | 0.81 | 0.71 | 17 / 17 |
 
-The app uses R. Untuned it already scored 0.64, so the rules carry most of the gain, not the tuning. With the tuned settings rounded it scores 0.79: it finds 15 of the 16 drops, and 16 of the 17 drops it proposes are real. Its weak spots are boundaries between drops, such as where a vocal comes in. It also misses a drop whose low end comes back in two steps: in *Weightless* the low end comes back halfway at 2:02 and fully at 2:06, and the next comeback is taken for the drop instead.
+These scores use the corrected answer key. My first map of *Scars* called its second drop a build. It starts with one hit, a short gap, then the 4/4 beat. Fixing that label made 17 drops instead of 16.
+
+The app uses R. Untuned it already scores 0.65, so the rules carry most of the gain, not the tuning. Its settings were tuned before the fix. With them it scores 0.76: it finds 15 of the 17 drops, and 16 of the 17 drops it proposes are real. Re-tuned on the corrected key, R finds all 17.
+
+Its weak spots:
+
+- Boundaries between drops, such as where a vocal comes in.
+- *Scars*' second drop, which those settings learned to treat as a build. The re-tuned lab version compares the comeback with the lowest bar in the previous 12 bars, not just the previous 2, and catches it.
+- A drop whose low end comes back in two steps. In *Weightless* the low end comes back halfway at 2:02 and fully at 2:06, and the next comeback is taken for the drop instead.
 
 The lab is in [`scripts/section_lab/`](scripts/section_lab/). It needs the audio, so it runs only on my machine:
 
@@ -382,7 +416,7 @@ PYTHONPATH=. SECTION_AUDIO=/folder/with/the/other/four/mp3s uv run python script
 ## Validation
 
 - `uv run pytest` runs 80 tests in about 20 seconds, with no network. The measurement tests use synthetic signals whose answers are known from how they are built: a full-scale sine reads 0 LUFS, a sidechained bass recovers on schedule, a polarity-flipped channel cancels in mono, and drops with an offbeat bass are found after builds whose bass fades out. The agent tests use a scripted fake model. They check parallel researchers, the round cap, clarification, interrupted runs and the report checks.
-- Real runs on the demo corpus are logged in DESIGN.md §12. The sample run above took 336 s for the analysis: two research rounds, 51 findings accepted and 18 rejected, and 3 priorities. With the brief and both follow-ups it cost $2.26.
+- Real runs on the demo corpus are logged in DESIGN.md §12. The sample run above took 403 s for the analysis: two research rounds, 58 findings accepted and 12 rejected, and 3 priorities. With the brief and both follow-ups it cost $2.41.
 
 ## Run it locally
 

@@ -100,16 +100,16 @@
               "id": "s7",
               "label": "build",
               "start_s": 207.395,
-              "end_s": 225.305,
+              "end_s": 221.723,
               "start_bar": 116,
-              "end_bar": 126
+              "end_bar": 124
             },
             {
               "id": "nmw4b96bo",
-              "label": "build",
-              "start_s": 225.305,
+              "label": "drop",
+              "start_s": 221.723,
               "end_s": 250.38,
-              "start_bar": 126,
+              "start_bar": 124,
               "end_bar": 140
             },
             {
