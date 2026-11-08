@@ -81,7 +81,9 @@ scripts/
   demo_measurements.py run every measurement tool on the demo corpus; writes evidence and charts to .data/
   demo_research.py     end-to-end brief and research run on the demo corpus, in-process (costs about $1)
   upload_demo.py       copy demo audio to the bucket
-  baselines.py         README no-tool baselines (same model, no tools, no system prompt)
+  samples.py           the README's three sample queries, shared by the next two
+  sample_queries.py    asks them on the deployed app as the browser does → demo/samples/agent.json
+  baselines.py         README no-tool baselines (same model, no tools, no system prompt) → demo/samples/baseline.json
 tests/                 synthetic-signal tests for the measurement code; agent tests with a scripted model (§12)
 Dockerfile  pyproject.toml  uv.lock  README.md  submission.json  SPEC.md  DESIGN.md
 ```
@@ -551,7 +553,11 @@ Track colours are fixed: your track plus References 1–3, with a distinct style
 
   - R untuned already scored 0.64, so its rules carry most of the gain, not the tuning. The app uses R with the tuned settings rounded (0.79 on all 8: drop time 0.86, drops 0.94, boundaries 0.56, labels 0.67; 15 of 16 drops found and 16 of 17 proposed drops real). The comeback threshold is the sharpest setting: 9–10 dB scores 0.79, 12 dB 0.70, so it sits mid-plateau at 9.5. Weak spots: boundaries inside the parts between drops (vocal entries move them; the spectrum-shape change only partly catches them), and Weightless, where the low end comes back in two steps (half at 2:02, full at 2:06): neither step clears 9.5 dB within 2 bars, so the drop is missed, and the next comeback (2:35, the producer's bridge) is taken for one.
   - A synthetic arrangement test (pytest) checks the case the first version failed: drops with the bass on the offbeat after builds whose bass fades out.
-- **Baselines:** `scripts/baselines.py` sends each README sample question to the Lead's model through LiteLLM with no tools and no system prompt, and stores the raw answers.
+- **Sample queries and baselines** (November 7, revision fix-the-mix-00012-tkj). `scripts/sample_queries.py` ran the README's three samples on the live app: the demo's request, then two follow-ups. The whole run cost $2.26.
+  - The analysis took 336 s: two rounds, 51 findings accepted and 18 rejected, and `finish_research` refused once for a check warning.
+  - The loudness follow-up was answered in 11 s from round-1 evidence. The stereo follow-up ran one `measure_stereo` first and took 12 s.
+  - `scripts/baselines.py` sent the same three questions in one conversation to the Lead's model through LiteLLM, with no tools and no system prompt, for $0.11. Its first message gives the track titles, roles and the producer's comments, but no audio or measurements. All three answers say the model cannot hear the audio and ask for measurements.
+  - The Lead's research summary contained one dash as the literal escape `\u2013`; the report itself was clean. The Lead's tool arguments are now decoded once more for such escapes (`lead._unescape`).
 
 ### Demo corpus
 
