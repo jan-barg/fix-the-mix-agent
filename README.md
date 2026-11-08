@@ -336,7 +336,7 @@ flowchart LR
 
 - **Lead** (Claude Opus 5.5) turns the producer's comments into a brief. It asks one short question instead when the request is too vague to act on. It sends the specialists focused questions, reviews what comes back and decides the priorities. It can run any measurement itself, or a second and third research round when a finding needs checking (at most three rounds).
 - **Four specialist researchers** (Claude Sonnet 5.5): kick, low end, tonal balance and loudness, stereo. Each runs in a fresh context with only the evidence the harness measured for it: numbers plus the charts as images. Each returns observations, comparisons, hedged interpretations and experiments to try, all citing that evidence. A values check flags any number that does not match the evidence, and the Lead rejects those findings.
-- **Writer** (Opus 5.5) turns the accepted findings into the report. Code then checks every number, chart link and required section, and the Writer gets one chance to repair what fails.
+- **Writer** (Opus 5.5) turns the accepted findings into the report. Code then checks every number, chart link and required section, and the Writer gets one chance to repair what fails. In the report, each number links to the measurement it came from.
 - **Humanizer** (Opus 5.5, adapted from the Humanizer skill) rewrites the prose so it reads less like a model. Any edit that changes a number, a track name, a section name or a hedge is undone.
 - **Follow-up questions** after the report go back to the Lead. It answers from the evidence it already has, or measures something new first.
 
@@ -415,8 +415,9 @@ PYTHONPATH=. SECTION_AUDIO=/folder/with/the/other/four/mp3s uv run python script
 
 ## Validation
 
-- `uv run pytest` runs 80 tests in about 20 seconds, with no network. The measurement tests use synthetic signals whose answers are known from how they are built: a full-scale sine reads 0 LUFS, a sidechained bass recovers on schedule, a polarity-flipped channel cancels in mono, and drops with an offbeat bass are found after builds whose bass fades out. The agent tests use a scripted fake model. They check parallel researchers, the round cap, clarification, interrupted runs and the report checks.
+- `uv run pytest` runs 81 tests in about 20 seconds, with no network. The measurement tests use synthetic signals whose answers are known from how they are built: a full-scale sine reads 0 LUFS, a sidechained bass recovers on schedule, a polarity-flipped channel cancels in mono, and drops with an offbeat bass are found after builds whose bass fades out. The agent tests use a scripted fake model. They check parallel researchers, the round cap, clarification, interrupted runs and the report checks.
 - Real runs on the demo corpus are logged in DESIGN.md §12. The sample run above took 403 s for the analysis: two research rounds, 58 findings accepted and 12 rejected, and 3 priorities. With the brief and both follow-ups it cost $2.41.
+- Two behaviours were tried on the live app. With the comments cleared, "make it better" and "idk something feels off, can you take a look" each got a clarifying question and no brief, and the brief followed once the question was answered. Asked which compressor Reference 1 used and how it was set, the Lead said a finished master can't show that, and gave what it had measured instead.
 
 ## Run it locally
 

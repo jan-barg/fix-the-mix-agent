@@ -118,7 +118,11 @@ section { margin-top: 96px; }
 .limits li::before { content: ""; position: absolute; left: 2px; top: 24px; width: 9px; height: 1px; background: var(--faint); }
 .sources { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
 .sources li { padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; line-height: 1.55; color: var(--muted); }
-.sources li a { color: var(--text); font-weight: 500; }
+.sources li a, .sources .title { color: var(--text); font-weight: 500; }
+.sources .n { font: 500 12px/1 var(--mono); color: var(--muted); }
+.sources li:target .n { color: var(--accent); }
+a.cite { margin-left: 2px; font: 400 .7em/1 var(--mono); color: var(--muted); text-decoration: none; vertical-align: .3em; white-space: nowrap; }
+a.cite:hover { color: var(--accent); }
 .sources .passages { display: block; margin-top: 2px; font: 400 12px/1.6 var(--mono); color: var(--muted); }
 
 footer { margin-top: 96px; padding-top: 24px; border-top: 1px solid var(--line); font: 400 12.5px/1.65 var(--mono); color: var(--muted); }
@@ -198,6 +202,7 @@ h3 { font-size: 13pt; }
 .limits li::before { top: 12.5pt; width: 6pt; }
 .sources li { padding: 6pt 0; font-size: 8.5pt; }
 .sources .passages { font-size: 7pt; }
+.sources .n { font-size: 7pt; }
 footer { margin-top: 30pt; padding-top: 10pt; font-size: 7.5pt; }
 {% endif %}
 </style>
@@ -208,7 +213,7 @@ footer { margin-top: 30pt; padding-top: 10pt; font-size: 7.5pt; }
   <div class="fig-head"><span class="fig-title">{{ f.title }}</span><span class="fig-tool">{{ f.tool }}</span></div>
   <div class="fig-screen"><img src="{{ f.src }}" alt="{{ f.title }}. {{ f.caption }}"></div>
   <figcaption>
-    Source: {{ f.caption }}
+    Source <a class="cite" href="#src-{{ f.source }}" aria-label="Source {{ f.source }}">[{{ f.source }}]</a>: {{ f.caption }}
     {% if f.warnings %}<span class="reliability">Some values here could not be measured reliably{{ "; see the source details" if not pdf }}.</span>{% endif %}
     {% if pdf %}
     <ul class="passages">{% for p in f.passages %}<li>{{ p }}</li>{% endfor %}</ul>
@@ -302,8 +307,9 @@ footer { margin-top: 30pt; padding-top: 10pt; font-size: 7.5pt; }
     {% endif %}
     {% if sources %}
     <h3>Sources</h3>
+    <p>The numbers in brackets throughout this report point to the measurements below.</p>
     <ol class="sources">
-      {% for f in sources %}<li><a href="#{{ f.id }}">{{ f.title }}</a>: {{ f.caption }}<span class="passages">{{ f.passages | join(" · ") }}</span></li>{% endfor %}
+      {% for s in sources %}<li id="src-{{ s.n }}"><span class="n">[{{ s.n }}]</span> {% for f in s.figures %}<a href="#{{ f.id }}">{{ f.title }}</a>{{ ", " if not loop.last }}{% else %}<span class="title">{{ s.tool }}</span>{% endfor %}: {{ s.caption }}<span class="passages">{{ s.passages | join(" · ") }}</span></li>{% endfor %}
     </ol>
     {% endif %}
   </section>

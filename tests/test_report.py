@@ -287,3 +287,26 @@ def test_a_passage_chart_ignores_sections_outside_the_passage():
     chart = figures.loudness_timeline(series, sections, {"user": (100.0, True)})
     width, height = Image.open(io.BytesIO(chart)).size
     assert width <= figures.WIDTH_IN * figures.DPI * 1.1 and height < 1000
+
+
+# --- Citations ---
+
+
+def test_cited_numbers_point_to_their_measurement_under_sources():
+    first, second = make_evidence(), make_evidence("ev_0000000b", "fig_0000000b")
+    second.figures = []  # a measurement with no chart in the report is still a source
+    c = validate.Context(evidence={first.id: first, second.id: second}, figures={"fig_0000000a"}, facts={128.0})
+    d = draft(para("general", "The attack is -29.7 dB against 17.1 dB in the 120-300 Hz band, kick & bass.",
+                   [claim(-29.7), claim(17.1, DIP)], ["fig_0000000a"]),
+              para("stereo", "The dip is 17.1 dB.", [Claim(name=DIP, value=17.1, unit="dB", evidence_id=second.id)]),
+              para("section_by_section", "A wrong claim is -5.0 dB.", [claim(-5.0)]))
+    page = render.html(make_run(), d, c)
+
+    assert "Your attack-to-body ratio is -29.7 dB<a class=\"cite\" href=\"#src-1\"" in page
+    # Two numbers from one measurement share a marker; a band has none; the prose stays escaped.
+    assert "-29.7 dB against 17.1 dB<a class=\"cite\" href=\"#src-1\"" in page
+    assert "300 Hz<a" not in page and "kick &amp; bass" in page
+    assert "The dip is 17.1 dB<a class=\"cite\" href=\"#src-2\"" in page
+    assert "A wrong claim is -5.0 dB.</p>" in page
+    assert "<li id=\"src-1\"><span class=\"n\">[1]</span> <a href=\"#fig_0000000a\">" in page
+    assert "<li id=\"src-2\"><span class=\"n\">[2]</span> <span class=\"title\">Kick analysis</span>" in page
