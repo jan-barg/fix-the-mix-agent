@@ -9,6 +9,7 @@ phase gets an error result. The Lead's conversation is append-only and lives in 
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -201,6 +202,21 @@ class _Context:
         self.run_id, self.phase = run_id, p
 
 
+ESCAPED = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
+def _unescape(value: Any) -> Any:
+    """Characters the model escaped twice in its arguments, back to characters. A demo summary said
+    "28\\u201335 Hz" in the analysis view instead of "28–35 Hz". Surrogate halves are left as they are."""
+    if isinstance(value, str):
+        return ESCAPED.sub(lambda m: m[0] if 0xD800 <= int(m[1], 16) <= 0xDFFF else chr(int(m[1], 16)), value)
+    if isinstance(value, list):
+        return [_unescape(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _unescape(v) for k, v in value.items()}
+    return value
+
+
 def _parse(model: type[BaseModel], raw: dict) -> Any:
     try:
         return model.model_validate(raw)
@@ -310,7 +326,7 @@ async def _call(ctx: _Context, call: dict, allow_researcher: bool) -> tuple[str,
     """Run one tool call; returns (result for the Lead, summary if it finished research)."""
     name = call["function"]["name"]
     try:
-        raw = json.loads(call["function"].get("arguments") or "{}")
+        raw = _unescape(json.loads(call["function"].get("arguments") or "{}"))
     except json.JSONDecodeError:
         raw = None
     event = trace.start(ctx.run_id, name=name, agent="lead", kind="llm_tool_call", args=raw if raw is not None else {})

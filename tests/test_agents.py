@@ -257,6 +257,15 @@ def test_the_round_cap_turns_researcher_calls_into_errors(store, monkeypatch):
     assert script.seen[1][-1]["content"].startswith("Error: Round cap reached")
 
 
+def test_characters_escaped_twice_in_arguments_reach_the_producer_as_characters(store, monkeypatch):
+    run = make_run()
+    Script(monkeypatch, run.id, completion(calls=[call("finish_research", 1, accepted=[], rejected=[], priorities=[],
+                                                       preserve=[], limitations=[], summary="Sub at 28\\u201335 Hz.")]))
+    reply, _ = asyncio.run(lead.chat(run.id, "go"))
+    assert reply == "Sub at 28–35 Hz."
+    assert lead._unescape(["\\ud83d", {"a": "\\u00e9"}]) == ["\\ud83d", {"a": "é"}]
+
+
 def test_finish_research_refuses_unknown_and_unchecked_findings(store, monkeypatch):
     run = make_run()
     fake_researchers(monkeypatch)
