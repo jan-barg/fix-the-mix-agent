@@ -437,6 +437,8 @@ PYTHONPATH=. uv run python scripts/baselines.py  # same model, no tools, no syst
 
 ## Deploy
 
+A push to `main` that changes the app (`app/`, `static/`, `demo/corpus.json`, `Dockerfile`, `pyproject.toml` or `uv.lock`) deploys it: a Cloud Build trigger on this repository builds the image and updates the Cloud Run service, keeping its settings and secret. The command below creates the service or deploys by hand.
+
 ```bash
 gcloud run deploy fix-the-mix --source . --project agentic-ai-msds --region us-east1 \
   --service-account fix-the-mix-run@agentic-ai-msds.iam.gserviceaccount.com \

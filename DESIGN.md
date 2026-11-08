@@ -501,6 +501,7 @@ Track colours are fixed: your track plus References 1–3, with a distinct style
     --allow-unauthenticated --quiet
   ```
 
+- **Continuous deployment (November 8):** the Cloud Build trigger `fix-the-mix-deploy-main` watches `main` on `jan-barg/fix-the-mix-agent`. It builds the Dockerfile, pushes the image to Artifact Registry and runs `gcloud run services update --image`, so the CPU, memory, secret and service account stay as the command above set them. It runs only when a push changes something that goes into the image: `app/` (the prompts too), `static/`, `demo/corpus.json`, `Dockerfile`, `pyproject.toml` or `uv.lock`. The build steps live in the trigger, not in the repository. A build takes about 5 minutes.
 - **GCP resources (created November 5):**
   - Project `agentic-ai-msds`, region `us-east1`. The project also hosts an unrelated `scavagent` service; nothing here touches its resources.
   - Bucket `gs://agentic-ai-msds-fix-the-mix`: uniform access, public access prevention enforced.
