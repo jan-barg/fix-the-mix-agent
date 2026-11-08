@@ -3,8 +3,8 @@
 Fix the Mix gives electronic music producers measured, section-aware feedback on a track. You upload your track and one to three reference tracks, say what each reference is for, and check where the intro, builds, drops and breakdowns are. A team of agents then measures the audio and compares it drop to drop and build to build. They return a report: what to change first, what to keep, and the charts behind every claim.
 
 - **Live app:** https://fix-the-mix-347988227457.us-east1.run.app
-- **Path:** Deep Research (Project 2). Solo project by Jan Barg (jgb2170).
-- **Data:** the producer's own audio. The models have never heard these recordings; every number in a report comes from measuring them (see [Data](#data)).
+- **Path:** Deep Research (Project 2). Solo project by Jan Barganowski (jgb2170).
+- **Data:** in each run, the user supplies their own songs. The models have never heard these recordings; every number in a report comes from measuring them (see [Data](#data)).
 
 ## Try it
 
@@ -17,7 +17,7 @@ To use your own music, upload WAV or MP3 files of up to 30 MB and between 20 sec
 
 ## Sample queries
 
-These come from one demo run on the live app on November 7, 2026. [`scripts/sample_queries.py`](scripts/sample_queries.py) asked them exactly as the browser does. Sample 1 is the demo's request; samples 2 and 3 are follow-up questions typed under the report. The run cost $2.26 in all. Here is [its report](https://fix-the-mix-347988227457.us-east1.run.app/api/runs/8ed6485c-454a-40ed-8a3a-41c65eb9a7a3/report) ([PDF](https://fix-the-mix-347988227457.us-east1.run.app/api/runs/8ed6485c-454a-40ed-8a3a-41c65eb9a7a3/report.pdf)), and [the run itself](https://fix-the-mix-347988227457.us-east1.run.app/#run=8ed6485c-454a-40ed-8a3a-41c65eb9a7a3) shows the trace. The raw replies, with every tool call, are in [`demo/samples/agent.json`](demo/samples/agent.json).
+These come from one demo run on the live app. [`scripts/sample_queries.py`](scripts/sample_queries.py) asked them exactly as the browser does. Sample 1 is the demo's request; samples 2 and 3 are follow-up questions typed under the report. The run cost $2.26 in all. Here is [its report](https://fix-the-mix-347988227457.us-east1.run.app/api/runs/8ed6485c-454a-40ed-8a3a-41c65eb9a7a3/report) ([PDF](https://fix-the-mix-347988227457.us-east1.run.app/api/runs/8ed6485c-454a-40ed-8a3a-41c65eb9a7a3/report.pdf)), and [the run itself](https://fix-the-mix-347988227457.us-east1.run.app/#run=8ed6485c-454a-40ed-8a3a-41c65eb9a7a3) shows the trace. The raw replies, with every tool call, are in [`demo/samples/agent.json`](demo/samples/agent.json).
 
 **Baselines.** [`scripts/baselines.py`](scripts/baselines.py) sent the same three questions, in one conversation, to the Lead's model (Claude Opus 5.5 through LiteLLM) with no tools and no system prompt. The first message gives what the producer types into the app: which track is which, the titles and the comments. The model gets no audio and no measurements. The Lead runs at high reasoning effort, the baseline at the default. The raw answers are in [`demo/samples/baseline.json`](demo/samples/baseline.json) ($0.11 for all three).
 
